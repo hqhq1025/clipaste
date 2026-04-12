@@ -116,6 +116,10 @@ This fixes a long-standing pain point across multiple projects:
 - [openai/codex#6080](https://github.com/openai/codex/issues/6080) — Image pasting issue
 - [ghostty-org/ghostty#10478](https://github.com/ghostty-org/ghostty/discussions/10478) — Support pasting screenshot images
 
+## Community
+
+- [LINUX DO](https://linux.do) — Where we first shared this project
+
 ## License
 
 MIT
