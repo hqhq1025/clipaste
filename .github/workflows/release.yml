@@ -9,23 +9,69 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  build-macos:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
       - name: Build
-        run: make build
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Verify binary
-        run: ./clipaste --version
-
-      - name: Create tarball
+      - name: Package
         run: |
-          tar czf clipaste-${{ github.ref_name }}-macos.tar.gz clipaste
+          cp target/${{ matrix.target }}/release/clipaste clipaste
+          tar czf clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz clipaste
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipaste-${{ matrix.target }}
+          path: clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        shell: bash
+        run: |
+          cp target/release/clipaste.exe clipaste.exe
+          7z a clipaste-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip clipaste.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipaste-windows
+          path: clipaste-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: clipaste-${{ github.ref_name }}-macos.tar.gz
+          files: |
+            clipaste-*.tar.gz
+            clipaste-*.zip
           generate_release_notes: true

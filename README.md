@@ -16,9 +16,30 @@ Your workflow becomes: **Screenshot → Cmd+V → Done.**
 
 ## Install
 
+### macOS (Homebrew)
+
 ```bash
 brew install hqhq1025/clipaste/clipaste
 brew services start clipaste
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
+```
+
+This downloads the latest release, installs to `%LOCALAPPDATA%\clipaste\`, adds to PATH, and sets auto-start via Registry. No admin required.
+
+### Build from source
+
+Requires Rust toolchain.
+
+```bash
+git clone https://github.com/hqhq1025/clipaste.git
+cd clipaste
+cargo build --release
+# Binary at target/release/clipaste (or clipaste.exe on Windows)
 ```
 
 That's it. clipaste runs in the background and starts automatically on login.
@@ -48,14 +69,15 @@ That's it. clipaste runs in the background and starts automatically on login.
 
 ## Compatibility
 
-| Terminal | Cmd+V | Ctrl+V |
-|----------|:-----:|:------:|
-| Ghostty  | ✅    | ✅     |
-| Alacritty| ✅    | ✅     |
-| iTerm2   | ✅    | ✅     |
-| Terminal.app | ✅ | ✅    |
-| WezTerm  | ✅    | ✅     |
-| Kitty    | ✅    | ✅     |
+| Terminal | macOS Cmd+V | macOS Ctrl+V | Windows Ctrl+V |
+|----------|:-----------:|:------------:|:--------------:|
+| Ghostty  | ✅          | ✅           | —              |
+| Alacritty| ✅          | ✅           | —              |
+| iTerm2   | ✅          | ✅           | —              |
+| Terminal.app | ✅       | ✅           | —              |
+| WezTerm  | ✅          | ✅           | ✅             |
+| Kitty    | ✅          | ✅           | ✅             |
+| Windows Terminal | —   | —            | ✅             |
 
 | AI Tool | Status |
 |---------|:------:|
@@ -65,39 +87,25 @@ That's it. clipaste runs in the background and starts automatically on login.
 
 ## Managing
 
+### macOS
+
 ```bash
-# Check status
-brew services info clipaste
+brew services info clipaste      # status
+brew services restart clipaste   # restart
+brew services stop clipaste      # stop
+```
 
-# View logs
-cat $(brew --prefix)/var/log/clipaste.log
+### Windows
 
-# Restart
-brew services restart clipaste
+```powershell
+# Stop
+taskkill /IM clipaste.exe /F
 
-# Stop and disable
-brew services stop clipaste
+# Disable auto-start
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "clipaste"
 
 # Uninstall
-brew services stop clipaste
-brew uninstall clipaste
-```
-
-## Build from source
-
-Requires Xcode Command Line Tools.
-
-```bash
-git clone https://github.com/hqhq1025/clipaste.git
-cd clipaste
-make build
-# Binary is at ./clipaste
-```
-
-To install system-wide:
-
-```bash
-sudo make install
+Remove-Item -Recurse "$env:LOCALAPPDATA\clipaste"
 ```
 
 ## How is this different from...
