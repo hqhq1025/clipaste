@@ -1,7 +1,6 @@
 use crate::common;
 use std::ptr;
 use windows_sys::Win32::Foundation::*;
-use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::DataExchange::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Memory::*;
@@ -9,15 +8,21 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 
+// Standard clipboard format constants
+const CF_BITMAP: u32 = 2;
+const CF_UNICODETEXT: u32 = 13;
+const CF_DIB: u32 = 8;
+const CF_HDROP: u32 = 15;
+
 static mut LAST_SEQ: u32 = 0;
 
 /// Check if clipboard has image data but no text or file drop
 fn is_image_only_clipboard() -> bool {
     unsafe {
-        let has_dib = IsClipboardFormatAvailable(CF_DIB as u32) != 0;
-        let has_bitmap = IsClipboardFormatAvailable(CF_BITMAP as u32) != 0;
-        let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT as u32) != 0;
-        let has_hdrop = IsClipboardFormatAvailable(CF_HDROP as u32) != 0;
+        let has_dib = IsClipboardFormatAvailable(CF_DIB) != 0;
+        let has_bitmap = IsClipboardFormatAvailable(CF_BITMAP) != 0;
+        let has_text = IsClipboardFormatAvailable(CF_UNICODETEXT) != 0;
+        let has_hdrop = IsClipboardFormatAvailable(CF_HDROP) != 0;
 
         (has_dib || has_bitmap) && !has_text && !has_hdrop
     }
@@ -26,13 +31,13 @@ fn is_image_only_clipboard() -> bool {
 /// Read CF_DIB data from clipboard and convert to PNG
 fn read_clipboard_as_png() -> Option<Vec<u8>> {
     unsafe {
-        if OpenClipboard(0) == 0 {
+        if OpenClipboard(ptr::null_mut() as HWND) == 0 {
             return None;
         }
 
         let result = (|| {
-            let handle = GetClipboardData(CF_DIB as u32);
-            if handle == 0 {
+            let handle = GetClipboardData(CF_DIB) as *mut u8;
+            if handle.is_null() {
                 return None;
             }
 
@@ -56,10 +61,10 @@ fn read_clipboard_as_png() -> Option<Vec<u8>> {
     }
 }
 
-/// Write a file path as text to the clipboard, preserving image data
+/// Write a file path as text to the clipboard, preserving PNG data
 fn write_path_to_clipboard(path: &str, png_data: &[u8]) {
     unsafe {
-        if OpenClipboard(0) == 0 {
+        if OpenClipboard(ptr::null_mut() as HWND) == 0 {
             return;
         }
 
@@ -69,19 +74,16 @@ fn write_path_to_clipboard(path: &str, png_data: &[u8]) {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let byte_len = wide.len() * 2;
         let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len);
-        if hmem.is_null() {
-            CloseClipboard();
-            return;
-        }
-        let dest = GlobalLock(hmem);
-        if !dest.is_null() {
-            ptr::copy_nonoverlapping(wide.as_ptr() as *const u8, dest as *mut u8, byte_len);
-            GlobalUnlock(hmem);
-            SetClipboardData(CF_UNICODETEXT as u32, hmem as isize);
+        if !hmem.is_null() {
+            let dest = GlobalLock(hmem);
+            if !dest.is_null() {
+                ptr::copy_nonoverlapping(wide.as_ptr() as *const u8, dest as *mut u8, byte_len);
+                GlobalUnlock(hmem);
+                SetClipboardData(CF_UNICODETEXT, hmem as HANDLE);
+            }
         }
 
         // Also register a custom "PNG" format with the PNG data
-        // Some tools check for this
         let png_format_name: Vec<u16> = "PNG\0".encode_utf16().collect();
         let png_format = RegisterClipboardFormatW(png_format_name.as_ptr());
         if png_format != 0 {
@@ -95,7 +97,7 @@ fn write_path_to_clipboard(path: &str, png_data: &[u8]) {
                         png_data.len(),
                     );
                     GlobalUnlock(hmem_png);
-                    SetClipboardData(png_format, hmem_png as isize);
+                    SetClipboardData(png_format, hmem_png as HANDLE);
                 }
             }
         }
@@ -134,10 +136,14 @@ fn normalize() {
     common::clean_old_temp_files();
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_CLIPBOARDUPDATE => {
-            // Deduplicate: check clipboard sequence number
             let seq = GetClipboardSequenceNumber();
             if seq != LAST_SEQ {
                 LAST_SEQ = seq;
@@ -172,9 +178,9 @@ pub fn run() {
             style: 0,
             cbClsExtra: 0,
             cbWndExtra: 0,
-            hIcon: 0,
-            hCursor: 0,
-            hbrBackground: 0,
+            hIcon: ptr::null_mut(),
+            hCursor: ptr::null_mut(),
+            hbrBackground: ptr::null_mut(),
             lpszMenuName: ptr::null(),
         };
 
@@ -184,15 +190,18 @@ pub fn run() {
             0,
             class_name.as_ptr(),
             class_name.as_ptr(),
-            0,               // no style (hidden)
-            0, 0, 0, 0,      // position/size don't matter
-            HWND_MESSAGE,     // message-only window
             0,
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            ptr::null_mut() as HMENU,
             hinstance,
             ptr::null(),
         );
 
-        if hwnd == 0 {
+        if hwnd.is_null() {
             common::log("failed to create hidden window");
             std::process::exit(1);
         }
@@ -204,9 +213,8 @@ pub fn run() {
 
         common::log("clipboard listener registered (event-driven, no polling)");
 
-        // Message loop
         let mut msg: MSG = std::mem::zeroed();
-        while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+        while GetMessageW(&mut msg, ptr::null_mut() as HWND, 0, 0) > 0 {
             DispatchMessageW(&msg);
         }
 
