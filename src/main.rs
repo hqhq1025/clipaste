@@ -39,7 +39,7 @@ fn main() {
     macos::run(latest);
 
     #[cfg(target_os = "windows")]
-    windows::run();
+    windows::run(latest);
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {

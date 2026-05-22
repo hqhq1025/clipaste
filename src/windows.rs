@@ -1,5 +1,6 @@
 use crate::common;
 use std::ptr;
+use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::DataExchange::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -15,6 +16,9 @@ const CF_DIB: u32 = 8;
 const CF_HDROP: u32 = 15;
 
 static mut LAST_SEQ: u32 = 0;
+
+/// Global shared state for the Win32 callback (wnd_proc can't capture closures)
+static LATEST: OnceLock<common::LatestImage> = OnceLock::new();
 
 /// Check if clipboard has image data but no text or file drop
 fn is_image_only_clipboard() -> bool {
@@ -106,7 +110,7 @@ fn write_path_to_clipboard(path: &str, png_data: &[u8]) {
     }
 }
 
-fn normalize() {
+fn normalize(latest: &common::LatestImage) {
     if !is_image_only_clipboard() {
         return;
     }
@@ -123,6 +127,11 @@ fn normalize() {
         Some(p) => p,
         None => return,
     };
+
+    // Update shared state for HTTP server
+    if let Ok(mut guard) = latest.lock() {
+        *guard = Some(file_path.clone());
+    }
 
     let path_str = file_path.to_string_lossy().to_string();
     write_path_to_clipboard(&path_str, &png_data);
@@ -147,7 +156,9 @@ unsafe extern "system" fn wnd_proc(
             let seq = GetClipboardSequenceNumber();
             if seq != LAST_SEQ {
                 LAST_SEQ = seq;
-                normalize();
+                if let Some(latest) = LATEST.get() {
+                    normalize(latest);
+                }
             }
             0
         }
@@ -159,7 +170,8 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-pub fn run() {
+pub fn run(latest: common::LatestImage) {
+    LATEST.set(latest).expect("LATEST already initialized");
     common::ensure_temp_dir();
     common::log(&format!(
         "v{} started (pid {})",
