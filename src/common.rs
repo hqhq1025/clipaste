@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-pub const VERSION: &str = "2.2.1";
+pub const VERSION: &str = "2.2.2";
 pub const DEFAULT_PORT: u16 = 18340;
 
 /// Shared state: path to the most recently saved screenshot PNG

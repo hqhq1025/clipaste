@@ -1,6 +1,6 @@
 [package]
 name = "clipaste"
-version = "2.2.1"
+version = "2.2.2"
 edition = "2021"
 description = "Fix macOS/Windows screenshot paste in terminal AI tools"
 license = "MIT"
