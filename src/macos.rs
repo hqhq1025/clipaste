@@ -87,6 +87,76 @@ fn read_png_data(pb: &NSPasteboard) -> Option<Vec<u8>> {
     None
 }
 
+/// Minimal percent-decoding for file URLs (e.g. `%20` → space).
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// If the clipboard holds a file URL pointing to an image file, return its path.
+///
+/// This covers the "screenshot saved to disk then copied" case (issue #5): the
+/// clipboard carries a `public.file-url`, not image bits. We only accept image
+/// extensions the bundled decoder can serve (png/tiff/bmp).
+fn image_file_url_on_clipboard(pb: &NSPasteboard) -> Option<std::path::PathBuf> {
+    let data = pb.dataForType(&file_url_type())?;
+    let raw = String::from_utf8(data.to_vec()).ok()?;
+    let raw = raw.trim();
+    let path = match raw.strip_prefix("file://") {
+        // file:///Users/... → strip scheme, drop the (empty) host, percent-decode
+        Some(rest) => percent_decode(rest.trim_start_matches(|c| c != '/')),
+        None => raw.to_string(),
+    };
+    let pb_path = std::path::PathBuf::from(path);
+    let ext = pb_path.extension()?.to_str()?.to_lowercase();
+    let is_supported_image = matches!(ext.as_str(), "png" | "tif" | "tiff" | "bmp");
+    if is_supported_image && pb_path.is_file() {
+        Some(pb_path)
+    } else {
+        None
+    }
+}
+
+/// Make a clipboard image *file* available to the HTTP server (for remote
+/// `clipaste-paste`) without touching the local clipboard — local Cmd+V keeps
+/// pasting whatever it pasted before. Issue #5.
+fn capture_image_file(src: &std::path::Path, latest: &common::LatestImage) {
+    let png = match common::image_file_to_png(src) {
+        Some(p) => p,
+        None => {
+            common::log("skip: clipboard file is not a supported image format");
+            return;
+        }
+    };
+    let tmp = match common::save_png_to_temp(&png) {
+        Some(p) => p,
+        None => return,
+    };
+    if let Ok(mut guard) = latest.lock() {
+        *guard = Some(tmp);
+    }
+    common::log(&format!(
+        "captured clipboard image file ({} bytes) for remote paste",
+        png.len()
+    ));
+    common::clean_old_temp_files();
+}
+
 fn normalize(pb: &NSPasteboard, latest: &common::LatestImage) {
     let png_data = match read_png_data(pb) {
         Some(d) => d,
@@ -205,7 +275,14 @@ pub fn run(latest: common::LatestImage) {
         }
 
         if !is_image_only_clipboard(&pb) {
-            common::log("skip: clipboard has file-url or text");
+            // Not raw image bits. But the clipboard may hold a *file URL* to an
+            // image (screenshot saved to disk then copied) — issue #5. Serve that
+            // file to the HTTP server for remote `clipaste-paste`, without
+            // rewriting the local clipboard.
+            match image_file_url_on_clipboard(&pb) {
+                Some(src) => capture_image_file(&src, &latest),
+                None => common::log("skip: clipboard has file-url or text"),
+            }
             return;
         }
 
