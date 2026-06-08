@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-pub const VERSION: &str = "2.3.0";
+pub const VERSION: &str = "2.4.0";
 pub const DEFAULT_PORT: u16 = 18340;
 
 /// Shared state: path to the most recently saved screenshot PNG
@@ -132,6 +132,39 @@ pub fn tiff_to_png(tiff_data: &[u8]) -> Option<Vec<u8>> {
     Some(buf)
 }
 
+/// Read an image file from disk and return PNG bytes.
+///
+/// Used when the clipboard holds a *file URL* pointing to an image (e.g. a macOS
+/// screenshot saved to disk, then copied in Finder) — see issue #5. Only formats
+/// the bundled `image` decoder supports are handled (png passthrough, tiff, bmp);
+/// macOS screenshots are PNG by default, which is the common case. Returns None
+/// for unsupported formats so the caller can skip cleanly rather than serve
+/// mislabeled bytes.
+#[cfg(target_os = "macos")]
+pub fn image_file_to_png(path: &std::path::Path) -> Option<Vec<u8>> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    let bytes = fs::read(path).ok()?;
+    match ext.as_str() {
+        "png" => Some(bytes), // already PNG — pass through unchanged
+        "tif" | "tiff" => tiff_to_png(&bytes),
+        "bmp" => {
+            let img = image::load_from_memory_with_format(&bytes, ImageFormat::Bmp).ok()?;
+            let rgba = img.to_rgba8();
+            let mut buf = Vec::new();
+            PngEncoder::new(Cursor::new(&mut buf))
+                .write_image(
+                    rgba.as_raw(),
+                    rgba.width(),
+                    rgba.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .ok()?;
+            Some(buf)
+        }
+        _ => None,
+    }
+}
+
 /// Convert Windows DIB (CF_DIB) bytes to PNG bytes
 #[cfg(target_os = "windows")]
 pub fn dib_to_png(dib_data: &[u8]) -> Option<Vec<u8>> {
@@ -190,9 +223,14 @@ pub fn print_help() {
 USAGE
   clipaste                       Run daemon (clipboard watcher + HTTP server)
   clipaste ssh-setup user@host   Configure remote server for image paste via SSH
+                                 (add -p PORT for a custom SSH port)
   clipaste wsl-setup             Configure WSL2 for image paste from Windows host
   clipaste --version             Print version
   clipaste --help                Show this help
+
+  On the remote, ssh-setup/wsl-setup also install a `clipaste-paste` command:
+  it fetches the current clipboard image into a real file and prints its path.
+  Use it with Codex CLI (which bypasses the xclip shim) or any macOS remote.
 
 WHAT IT DOES
   Local:  Watches the clipboard. When a screenshot is detected, saves it as
@@ -200,6 +238,8 @@ WHAT IT DOES
 
   SSH:    Runs an HTTP server on port {DEFAULT_PORT}. Use 'ssh-setup' to
           configure SSH RemoteForward + xclip shim on a remote server.
+          Claude Code (Linux remote) pastes natively with Ctrl+V; Codex CLI
+          and macOS remotes use the `clipaste-paste` helper.
 
   WSL2:   Run 'wsl-setup' inside WSL2 to install xclip shim that fetches
           images from clipaste.exe on the Windows host. No SSH needed.

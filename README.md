@@ -43,21 +43,40 @@ clipaste can bridge your local clipboard to remote servers over SSH. One-time se
 
 ```bash
 clipaste ssh-setup user@your-server
+clipaste ssh-setup user@your-server -p 22222   # custom SSH port
 ```
 
 This automatically:
-- Installs an xclip shim on the remote server (`~/.local/bin/xclip`)
-- Adds `RemoteForward 18340` to your `~/.ssh/config`
+- Detects the remote OS (`uname -s`) and installs the right helpers
+- On a Linux remote: installs an xclip/wl-paste shim (`~/.local/bin/`)
+- Installs a universal `clipaste-paste` command on every remote
+- Adds `RemoteForward 18340` (and `Port` if you passed `-p`) to your `~/.ssh/config`
 - No extra tools needed on the remote server (just `curl`)
 
-After setup, open a **new** SSH session and use **Ctrl+V** in Claude Code / Codex:
+After setup, open a **new** SSH session:
 
 ```bash
 ssh user@your-server
-claude   # Ctrl+V pastes screenshots from your local Mac
+claude   # Ctrl+V pastes screenshots from your local Mac (Linux remote)
+codex    # run `clipaste-paste`, then paste the printed path (see below)
 ```
 
-### How SSH paste works
+### Pasting in Codex CLI / on a macOS remote
+
+Codex CLI reads the clipboard **in-process** (via X11/NSPasteboard) and bypasses
+the xclip shim, so it can't paste images natively over SSH. macOS remotes have
+the same gap (the tool reads the remote Mac's own, empty clipboard). For both,
+use the `clipaste-paste` helper that `ssh-setup` installs:
+
+```bash
+clipaste-paste            # → /tmp/clipaste-<ts>.png  (a real file on the remote)
+```
+
+Take a screenshot (or copy an image file) on your Mac, run `clipaste-paste` on the
+remote, and hand the printed path to Codex / Claude Code — both accept an image
+file path. This works the same on Linux and macOS remotes.
+
+### How SSH paste works (Claude Code, Linux remote)
 
 ```
 Local Mac                          Remote Server (via SSH)
@@ -107,12 +126,19 @@ HTTP server ◄──── WSL2 network ────────► curl $WIN_H
 |----------|----------|-------------|
 | **Local terminal (macOS)** | **Cmd+V** | Ghostty/iTerm2 paste file path → tool reads file |
 | **Local terminal** | **Ctrl+V** | Claude Code reads clipboard image directly |
-| **SSH remote** | **Ctrl+V** | xclip shim → HTTP tunnel → local PNG |
-| **WSL2** | **Ctrl+V** | xclip shim → HTTP → Windows host PNG |
+| **SSH remote — Claude Code (Linux)** | **Ctrl+V** | xclip shim → HTTP tunnel → local PNG |
+| **SSH remote — Codex / macOS remote** | `clipaste-paste` | helper fetches PNG → paste the printed path |
+| **WSL2 — Claude Code** | **Ctrl+V** | xclip shim → HTTP → Windows host PNG |
+| **WSL2 — Codex** | `clipaste-paste` | helper fetches PNG → paste the printed path |
 
-**Tip:** Ctrl+V works everywhere (local, SSH, WSL2). Cmd+V is a macOS local-only bonus.
+**Tip:** On a Linux remote, Claude Code pastes with Ctrl+V. Codex CLI and macOS
+remotes use the `clipaste-paste` helper instead (Codex bypasses the xclip shim).
 
-> **Important:** In an SSH session, **always use Ctrl+V**, never Cmd+V. Cmd+V pastes the local Mac path as text, which the remote agent cannot read. Ctrl+V triggers the xclip shim, which fetches the image through the SSH tunnel and gives the remote agent a real remote path.
+> **Important:** In an SSH session with Claude Code, **use Ctrl+V**, never Cmd+V —
+> Cmd+V pastes the local Mac path as text, which the remote agent cannot read.
+> Ctrl+V triggers the xclip shim, which fetches the image through the SSH tunnel.
+> For **Codex CLI** (which doesn't use the shim) or a **macOS remote**, run
+> `clipaste-paste` and hand the printed path to the agent.
 
 ## Compatibility
 
@@ -128,9 +154,13 @@ HTTP server ◄──── WSL2 network ────────► curl $WIN_H
 
 | AI Tool | Local | SSH Remote | WSL2 |
 |---------|:-----:|:----------:|:----:|
-| Claude Code | ✅ | ✅ | ✅ |
-| Codex CLI   | ✅ | ✅ | ✅ |
-| Cursor CLI  | ✅ | ✅ | ✅ |
+| Claude Code | ✅ | ✅ Ctrl+V | ✅ Ctrl+V |
+| Codex CLI   | ✅ | ⚠️ via `clipaste-paste` | ⚠️ via `clipaste-paste` |
+| Cursor CLI  | ✅ | ✅ Ctrl+V | ✅ Ctrl+V |
+
+> Codex reads the clipboard in-process and bypasses the xclip shim, so it can't
+> paste images natively over SSH/WSL2 — use the `clipaste-paste` helper. macOS
+> remotes (any tool) also use `clipaste-paste`. See [SSH Remote Paste](#ssh-remote-paste).
 
 ## Managing
 
@@ -161,11 +191,24 @@ macOS screenshots place raw TIFF/PNG image data on the clipboard, but terminals 
 
 ### How do I paste clipboard images over SSH?
 
-Run `clipaste ssh-setup user@your-server` once on your local machine. This installs a lightweight xclip shim on the remote server and configures an SSH tunnel. After setup, open a new SSH session and press **Ctrl+V** in Claude Code or Codex — the image is fetched from your local machine through the tunnel automatically.
+Run `clipaste ssh-setup user@your-server` once on your local machine (add `-p PORT`
+for a non-default SSH port). It detects the remote OS, installs a lightweight
+xclip shim (Linux) plus a universal `clipaste-paste` helper, and configures an SSH
+tunnel. After setup, open a new SSH session:
+
+- **Claude Code on a Linux remote:** press **Ctrl+V** — the image is fetched
+  through the tunnel automatically.
+- **Codex CLI, or any tool on a macOS remote:** run `clipaste-paste` and hand the
+  printed path to the agent. Codex reads the clipboard in-process and bypasses the
+  xclip shim, so it cannot paste natively over SSH; the helper is the working path.
 
 ### Does clipaste work with WSL2?
 
-Yes. Run `clipaste wsl-setup` inside your WSL2 environment. This installs an xclip shim that connects directly to clipaste.exe on the Windows host — no SSH tunnel needed. After setup, **Ctrl+V** in Claude Code or Codex inside WSL2 fetches screenshots from the Windows clipboard.
+Yes. Run `clipaste wsl-setup` inside your WSL2 environment. This installs an xclip
+shim (used by Claude Code) plus the `clipaste-paste` helper (used by Codex),
+connecting directly to clipaste.exe on the Windows host — no SSH tunnel needed.
+After setup, **Ctrl+V** in Claude Code fetches screenshots from the Windows
+clipboard; for Codex, run `clipaste-paste` and paste the printed path.
 
 ### How much memory and CPU does clipaste use?
 
@@ -173,7 +216,7 @@ clipaste uses approximately 9 MB of RAM and 0% CPU when idle. It is written in R
 
 ### Which terminals and AI tools does clipaste support?
 
-clipaste works with Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, and Windows Terminal. It supports Claude Code, Codex CLI, and Cursor CLI. Both **Cmd+V** (macOS local) and **Ctrl+V** (all platforms including SSH and WSL2) are supported. See the compatibility tables above for the full matrix.
+clipaste works with Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, and Windows Terminal. It supports Claude Code, Codex CLI, and Cursor CLI. **Cmd+V** (macOS local) and **Ctrl+V** (local, plus SSH/WSL2 for shim-based tools like Claude Code) are supported; Codex CLI and macOS remotes use the `clipaste-paste` helper. See the compatibility tables above for the full matrix.
 
 ## How is this different from...
 
