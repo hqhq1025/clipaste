@@ -105,6 +105,33 @@ This installs the same xclip shim, pointed at clipaste.exe running on your Windo
 
 **Prerequisites:** clipaste.exe must be running on the Windows side (installed via the PowerShell one-liner above).
 
+### WSL2 networking modes
+
+`wsl-setup` finds the Windows host by probing candidate addresses and keeping the
+first one that actually answers `/health` — so both WSL2 networking modes work:
+
+| `networkingMode` | Windows host is reachable at | Notes |
+|---|---|---|
+| `mirrored` | `127.0.0.1` | WSL shares the host's interfaces. With `dnsTunneling=true` the `/etc/resolv.conf` nameserver is a virtual DNS endpoint (`10.255.255.254`), **not** the host — probing loopback is what makes this work. |
+| `nat` (default) | the vEthernet gateway | Usually the `/etc/resolv.conf` nameserver; read from the routing table when DNS tunneling replaces it. |
+
+If auto-detection picks nothing, pass the address yourself:
+
+```bash
+clipaste wsl-setup --host 127.0.0.1
+```
+
+> **NAT mode on older Windows:** clipaste binds to `127.0.0.1` on the Windows
+> side, which NAT-mode WSL cannot reach. Prefer `networkingMode=mirrored` in
+> `%USERPROFILE%\.wslconfig` (Windows 11 22H2+). If mirrored mode is unavailable,
+> forward the port on the Windows host from an elevated PowerShell:
+> ```powershell
+> netsh interface portproxy add v4tov4 listenport=18340 `
+>   listenaddress=(Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL*)' -AddressFamily IPv4).IPAddress `
+>   connectport=18340 connectaddress=127.0.0.1
+> ```
+> then run `clipaste wsl-setup` again.
+
 ```
 Windows Host                       WSL2
 ────────────                       ────
@@ -209,6 +236,8 @@ shim (used by Claude Code) plus the `clipaste-paste` helper (used by Codex),
 connecting directly to clipaste.exe on the Windows host — no SSH tunnel needed.
 After setup, **Ctrl+V** in Claude Code fetches screenshots from the Windows
 clipboard; for Codex, run `clipaste-paste` and paste the printed path.
+Both `networkingMode=mirrored` and the default NAT mode are detected
+automatically — see [WSL2 networking modes](#wsl2-networking-modes).
 
 ### How much memory and CPU does clipaste use?
 

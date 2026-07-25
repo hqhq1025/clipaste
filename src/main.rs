@@ -31,9 +31,16 @@ fn main() {
         return;
     }
 
-    // clipaste wsl-setup (run inside WSL2)
+    // clipaste wsl-setup [--host IP] (run inside WSL2)
     if args.len() >= 2 && args[1] == "wsl-setup" {
-        ssh_setup::run_wsl();
+        match parse_wsl_setup_args(&args[2..]) {
+            Ok(host) => ssh_setup::run_wsl(host),
+            Err(e) => {
+                eprintln!("clipaste wsl-setup: {e}");
+                eprintln!("usage: clipaste wsl-setup [--host IP]");
+                std::process::exit(1);
+            }
+        }
         return;
     }
 
@@ -110,9 +117,45 @@ fn parse_ssh_setup_args(args: &[String]) -> Result<(String, Option<u16>), String
     }
 }
 
+/// Parse `wsl-setup` arguments into an optional Windows-host override.
+///
+/// `--host IP` / `--host=IP` skips address auto-detection entirely. It exists as
+/// an escape hatch for setups where neither the resolv.conf nameserver, the
+/// default gateway, nor loopback is the reachable address (issue #7).
+fn parse_wsl_setup_args(args: &[String]) -> Result<Option<String>, String> {
+    let mut host: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--host" {
+            let val = args
+                .get(i + 1)
+                .ok_or_else(|| "--host requires an address".to_string())?;
+            if val.is_empty() || val.starts_with('-') {
+                return Err("--host requires an address".to_string());
+            }
+            host = Some(val.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(rest) = a.strip_prefix("--host=") {
+            if rest.is_empty() {
+                return Err("--host requires an address".to_string());
+            }
+            host = Some(rest.to_string());
+            i += 1;
+            continue;
+        }
+        return Err(format!("unexpected argument: {a}"));
+    }
+
+    Ok(host)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_ssh_setup_args;
+    use super::{parse_ssh_setup_args, parse_wsl_setup_args};
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
@@ -156,5 +199,31 @@ mod tests {
         assert!(parse_ssh_setup_args(&s(&["-p", "70000", "h"])).is_err()); // overflow u16
         assert!(parse_ssh_setup_args(&s(&["-x", "h"])).is_err()); // unknown flag
         assert!(parse_ssh_setup_args(&s(&[])).is_err()); // no host
+    }
+
+    #[test]
+    fn wsl_setup_defaults_to_autodetect() {
+        assert_eq!(parse_wsl_setup_args(&s(&[])).unwrap(), None);
+    }
+
+    #[test]
+    fn wsl_setup_host_forms() {
+        assert_eq!(
+            parse_wsl_setup_args(&s(&["--host", "127.0.0.1"])).unwrap(),
+            Some("127.0.0.1".to_string())
+        );
+        assert_eq!(
+            parse_wsl_setup_args(&s(&["--host=172.29.128.1"])).unwrap(),
+            Some("172.29.128.1".to_string())
+        );
+    }
+
+    #[test]
+    fn wsl_setup_errors() {
+        assert!(parse_wsl_setup_args(&s(&["--host"])).is_err()); // missing value
+        assert!(parse_wsl_setup_args(&s(&["--host", "--x"])).is_err()); // value looks like a flag
+        assert!(parse_wsl_setup_args(&s(&["--host="])).is_err()); // empty value
+        assert!(parse_wsl_setup_args(&s(&["10.0.0.1"])).is_err()); // bare positional
+        assert!(parse_wsl_setup_args(&s(&["--nope"])).is_err()); // unknown flag
     }
 }

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-pub const VERSION: &str = "2.4.0";
+pub const VERSION: &str = "2.4.1";
 pub const DEFAULT_PORT: u16 = 18340;
 
 /// Shared state: path to the most recently saved screenshot PNG
@@ -225,6 +225,7 @@ USAGE
   clipaste ssh-setup user@host   Configure remote server for image paste via SSH
                                  (add -p PORT for a custom SSH port)
   clipaste wsl-setup             Configure WSL2 for image paste from Windows host
+                                 (add --host IP to skip host auto-detection)
   clipaste --version             Print version
   clipaste --help                Show this help
 
@@ -243,6 +244,8 @@ WHAT IT DOES
 
   WSL2:   Run 'wsl-setup' inside WSL2 to install xclip shim that fetches
           images from clipaste.exe on the Windows host. No SSH needed.
+          The Windows host address is probed automatically (mirrored and NAT
+          networking modes both work); override it with --host IP if needed.
 
 COMPATIBILITY
   macOS:   Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty
