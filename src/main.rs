@@ -1,4 +1,5 @@
 mod common;
+mod doctor;
 mod server;
 mod ssh_setup;
 #[cfg(target_os = "macos")]
@@ -42,6 +43,17 @@ fn main() {
             }
         }
         return;
+    }
+
+    // clipaste doctor [--json] — diagnose this machine and print the fix
+    if args.len() >= 2 && args[1] == "doctor" {
+        let json = args[2..].iter().any(|a| a == "--json");
+        if let Some(bad) = args[2..].iter().find(|a| *a != "--json") {
+            eprintln!("clipaste doctor: unexpected argument: {bad}");
+            eprintln!("usage: clipaste doctor [--json]");
+            std::process::exit(2);
+        }
+        std::process::exit(doctor::run(json));
     }
 
     // Start HTTP server for remote access

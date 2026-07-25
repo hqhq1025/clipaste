@@ -48,6 +48,47 @@ pub fn ensure_temp_dir() {
     let _ = fs::create_dir_all(temp_dir());
 }
 
+/// Minimal HTTP GET via `curl`.
+///
+/// clipaste deliberately ships with no HTTP client crate — the only things it
+/// ever fetches are its own endpoints on loopback or an SSH tunnel, and `curl`
+/// is present on every platform we target (Windows 10+ bundles `curl.exe`).
+/// Returns `None` on any transport error or non-2xx status (`-f`).
+///
+/// Timeouts are bounded: callers probe several candidate addresses in sequence,
+/// and a firewall that DROPs instead of rejecting would otherwise stall each
+/// attempt for minutes.
+pub fn http_get(url: &str) -> Option<String> {
+    let out = std::process::Command::new("curl")
+        .args(["-sf", "--connect-timeout", "2", "-m", "5", url])
+        .output()
+        .ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        None
+    }
+}
+
+/// Escape a string for embedding in the hand-rolled JSON of `doctor --json`.
+/// Kept here (rather than pulling in serde) because it is the only JSON we
+/// ever *write* beyond fixed literals.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn log(msg: &str) {
     let now = chrono_lite();
     eprintln!("[{now}] clipaste: {msg}");
@@ -222,12 +263,19 @@ pub fn print_help() {
 
 USAGE
   clipaste                       Run daemon (clipboard watcher + HTTP server)
+  clipaste doctor [--json]       Diagnose this machine and print the fix command
   clipaste ssh-setup user@host   Configure remote server for image paste via SSH
                                  (add -p PORT for a custom SSH port)
   clipaste wsl-setup             Configure WSL2 for image paste from Windows host
                                  (add --host IP to skip host auto-detection)
   clipaste --version             Print version
   clipaste --help                Show this help
+
+FOR CODING AGENTS
+  `clipaste doctor --json` is the machine-readable entry point. Every check
+  carries name/status/detail/fix; `fix` is a literal command to run.
+  Exit 0 = usable, 1 = broken, 2 = bad arguments. All setup commands are
+  non-interactive. See AGENTS.md in the repo for the full install recipe.
 
   On the remote, ssh-setup/wsl-setup also install a `clipaste-paste` command:
   it fetches the current clipboard image into a real file and prints its path.

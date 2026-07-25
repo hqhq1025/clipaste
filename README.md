@@ -189,6 +189,37 @@ remotes use the `clipaste-paste` helper instead (Codex bypasses the xclip shim).
 > paste images natively over SSH/WSL2 — use the `clipaste-paste` helper. macOS
 > remotes (any tool) also use `clipaste-paste`. See [SSH Remote Paste](#ssh-remote-paste).
 
+## For coding agents
+
+clipaste is built to be installed and repaired by an agent, not just by a human
+reading docs. Point your agent at [AGENTS.md](AGENTS.md), or give it one command:
+
+```bash
+clipaste doctor --json
+```
+
+It classifies the machine (`clipboard-host` / `ssh-remote` / `wsl2`), runs only
+the checks that apply there, and returns a literal `fix` command for anything
+broken:
+
+```json
+{
+  "version": "2.4.1",
+  "os": "linux",
+  "role": "ssh-remote",
+  "status": "fail",
+  "checks": [
+    { "name": "helper", "status": "ok",   "detail": "~/.local/bin/clipaste-paste", "fix": null },
+    { "name": "bridge", "status": "fail", "detail": "http://127.0.0.1:18340 is not answering",
+      "fix": "reconnect: the SSH RemoteForward is only active inside a session opened after ssh-setup" }
+  ]
+}
+```
+
+Exit code is `0` when usable (including warnings), `1` when broken, `2` on bad
+arguments. Every setup command is non-interactive and idempotent, so an agent
+can run them unattended.
+
 ## Managing
 
 ### macOS
