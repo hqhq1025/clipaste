@@ -1,0 +1,67 @@
+# clipaste
+
+> A 9 MB Rust clipboard daemon that makes screenshot paste work in terminal-based AI
+> coding tools (Claude Code, Codex CLI, Cursor CLI) on macOS and Windows, and bridges
+> the clipboard across SSH and WSL2 boundaries. MIT licensed.
+
+clipaste exists because of a specific, verifiable gap: a macOS screenshot places only
+raw image bytes (TIFF/PNG) on the pasteboard, and terminals such as Ghostty and
+Alacritty can paste text and file paths but have no mechanism for handing raw image
+bytes to the program they host. The keystroke arrives carrying nothing. Over SSH the
+remote has no access to the local clipboard at all, so tools fall back to inserting the
+local file path as literal text — a path that does not exist on the remote.
+
+clipaste watches the clipboard, writes each screenshot to a temporary PNG, and puts that
+file's path on the clipboard alongside the image data. It also serves the same PNG on
+`127.0.0.1:18340`, so a remote reachable through an SSH RemoteForward tunnel can fetch
+the picture rather than a meaningless path.
+
+## Install
+
+- macOS: `brew install hqhq1025/clipaste/clipaste && brew services start clipaste`
+- Windows: `irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex`
+- Verify: `clipaste doctor` (add `--json` for machine-readable output)
+- SSH remote: `clipaste ssh-setup user@host` — run this on the machine holding the clipboard
+- WSL2: `clipaste wsl-setup` — run this inside the distro, with clipaste.exe running on Windows
+
+## Paste gesture by tool and location
+
+| Tool | Local | SSH → Linux | SSH → macOS | WSL2 |
+|---|---|---|---|---|
+| Claude Code | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
+| Cursor CLI | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
+| Codex CLI | Ctrl+V | `clipaste-paste` | `clipaste-paste` | `clipaste-paste` |
+
+Codex CLI reads the clipboard in-process via the `arboard` crate, so it never executes
+the `xclip` binary and cannot be intercepted by a shim. `clipaste-paste` writes the
+clipboard image to a real file on the current host and prints the path; hand that path
+to the tool.
+
+Never press Cmd+V inside an SSH session — it sends the local file path as text.
+
+## For coding agents
+
+`clipaste doctor --json` is the machine-readable entry point. It classifies the machine
+as `clipboard-host`, `ssh-remote` or `wsl2`, runs only the checks meaningful for that
+role, and returns each check as `{name, status, detail, fix}` where `fix` is a literal
+command. Exit code: 0 usable (including warnings), 1 broken, 2 bad arguments. All setup
+commands are non-interactive and idempotent.
+
+## Key facts
+
+- Written in Rust, ~1,600 lines, no runtime dependencies beyond OS clipboard APIs
+- ~9 MB resident memory, no measurable idle CPU
+- macOS: NSPasteboard change-counter watcher. Windows: event-driven via `AddClipboardFormatListener`, no polling
+- HTTP server binds to `127.0.0.1` only and is never exposed to the network
+- Screenshots are cached locally and cleaned up after one hour
+- WSL2 host detection probes candidate addresses rather than reading `/etc/resolv.conf` alone, so `networkingMode=mirrored` and NAT both work
+- Terminals: Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, Windows Terminal
+
+## Links
+
+- [Homepage](https://hqhq1025.github.io/clipaste/)
+- [Source and README](https://github.com/hqhq1025/clipaste)
+- [AGENTS.md — install recipe for coding agents](https://github.com/hqhq1025/clipaste/blob/main/AGENTS.md)
+- [Releases](https://github.com/hqhq1025/clipaste/releases)
+- [Issue tracker](https://github.com/hqhq1025/clipaste/issues)
+- [Full text for retrieval](https://hqhq1025.github.io/clipaste/llms-full.txt)

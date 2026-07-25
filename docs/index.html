@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+<title>clipaste — paste screenshots in Claude Code, Codex CLI, SSH &amp; WSL2</title>
+<meta name="description" content="clipaste is a 9 MB Rust clipboard daemon that makes screenshot paste work in terminal AI coding tools on macOS and Windows, and bridges your clipboard to SSH remotes and WSL2. One command to install, one command to diagnose.">
+<link rel="canonical" href="https://hqhq1025.github.io/clipaste/">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://hqhq1025.github.io/clipaste/">
+<meta property="og:title" content="clipaste — screenshot paste that works in terminal AI tools">
+<meta property="og:description" content="Ctrl+V does nothing when you paste a screenshot into Claude Code or Codex CLI. clipaste fixes that locally, over SSH, and in WSL2. 9 MB of Rust, no runtime dependencies.">
+<meta property="og:image" content="https://hqhq1025.github.io/clipaste/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="clipaste">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="clipaste — screenshot paste that works in terminal AI tools">
+<meta name="twitter:description" content="Ctrl+V does nothing when you paste a screenshot into Claude Code or Codex CLI. clipaste fixes that locally, over SSH, and in WSL2.">
+<meta name="twitter:image" content="https://hqhq1025.github.io/clipaste/og.png">
+
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@600;700&family=Spline+Sans+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://hqhq1025.github.io/clipaste/#software",
+      "name": "clipaste",
+      "alternateName": "clipaste clipboard daemon",
+      "description": "A clipboard daemon that makes screenshot paste work in terminal-based AI coding tools such as Claude Code, Codex CLI and Cursor CLI, and bridges the clipboard to SSH remotes and WSL2 environments.",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "Command line utility",
+      "operatingSystem": ["macOS", "Windows 10", "Windows 11", "Linux (as SSH remote)", "WSL2"],
+      "softwareVersion": "2.4.1",
+      "programmingLanguage": "Rust",
+      "license": "https://opensource.org/licenses/MIT",
+      "downloadUrl": "https://github.com/hqhq1025/clipaste/releases",
+      "installUrl": "https://github.com/hqhq1025/clipaste#install",
+      "codeRepository": "https://github.com/hqhq1025/clipaste",
+      "url": "https://hqhq1025.github.io/clipaste/",
+      "memoryRequirements": "9 MB",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "author": { "@type": "Person", "name": "Haoqing Wang", "url": "https://github.com/hqhq1025" },
+      "featureList": [
+        "Makes Cmd+V and Ctrl+V paste screenshots in Ghostty, Alacritty, iTerm2, WezTerm, Kitty and Windows Terminal",
+        "Bridges the local clipboard to an SSH remote over an SSH RemoteForward tunnel",
+        "Bridges the Windows clipboard into WSL2 in both mirrored and NAT networking modes",
+        "Machine-readable diagnostics via clipaste doctor --json for coding agents",
+        "Runs in about 9 MB of RAM with no measurable idle CPU usage"
+      ]
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://hqhq1025.github.io/clipaste/#install",
+      "name": "Install clipaste and paste a screenshot into a terminal AI tool",
+      "description": "Install the clipaste daemon on the machine that holds the clipboard, then paste a screenshot into Claude Code, Codex CLI or Cursor CLI.",
+      "totalTime": "PT2M",
+      "tool": [{ "@type": "HowToTool", "name": "A terminal" }],
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Install the daemon",
+          "text": "On macOS run: brew install hqhq1025/clipaste/clipaste && brew services start clipaste. On Windows run: irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Verify the install",
+          "text": "Run clipaste doctor. It reports whether the daemon is answering and prints the exact command to run if anything is wrong."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Take a screenshot and paste",
+          "text": "Press Cmd+Shift+4 on macOS or Win+Shift+S on Windows, then press Cmd+V or Ctrl+V in Claude Code, Codex CLI or Cursor CLI."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Optional: extend it to an SSH remote or WSL2",
+          "text": "Run clipaste ssh-setup user@host from the machine holding the clipboard, or clipaste wsl-setup from inside a WSL2 distro."
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://hqhq1025.github.io/clipaste/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Why does Ctrl+V do nothing when I paste a screenshot into Claude Code?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A macOS screenshot puts only raw image data (TIFF or PNG bytes) on the clipboard. Terminals such as Ghostty and Alacritty can paste text and file paths, but they have no way to hand raw image bytes to the program running inside them, so the keystroke reaches the AI tool carrying nothing. clipaste watches the clipboard, writes the screenshot to a temporary PNG file, and puts that file's path on the clipboard alongside the image data, which is something a terminal can pass through."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can I paste screenshots into Claude Code running on a remote server over SSH?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Run clipaste ssh-setup user@host from the machine holding the clipboard. It installs an xclip shim on the remote and adds an SSH RemoteForward to your ~/.ssh/config, so the remote fetches the image back through the tunnel. Open a new SSH session afterwards, then press Ctrl+V in Claude Code. Never press Cmd+V in an SSH session: that sends your local file path as text, and the remote agent cannot open a path that does not exist there."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why can't Codex CLI paste images over SSH the way Claude Code can?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Codex CLI reads the clipboard in-process through the arboard crate, which talks to X11 or Wayland directly and never runs the xclip binary. That means it bypasses the shim clipaste installs, and there is no environment variable to redirect it. clipaste ships a clipaste-paste command instead: run it on the remote and it writes the current clipboard image to a real file there and prints the path. Hand that path to Codex and it attaches the image."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does clipaste work in WSL2?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. Run clipaste wsl-setup inside the WSL2 distro while clipaste.exe is running on Windows. Setup probes several candidate addresses for the Windows host and keeps the first that answers, so both networkingMode=mirrored (where the host is reachable at 127.0.0.1) and the default NAT mode are handled. Under mirrored networking with DNS tunnelling, the /etc/resolv.conf nameserver is a virtual DNS endpoint rather than the host, which is why probing rather than reading DNS config is what makes it work."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does a coding agent install and verify clipaste without guessing?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Run clipaste doctor --json. It classifies the machine as clipboard-host, ssh-remote or wsl2, runs only the checks meaningful for that role, and returns each check as name, status, detail and fix, where fix is a literal command to run. The exit code is 0 when usable, 1 when broken and 2 on bad arguments. The repository also carries an AGENTS.md with the full install recipe."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How much memory and CPU does clipaste use?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "About 9 MB of resident memory and no measurable CPU when idle. It is written in Rust with no runtime dependencies beyond the operating system clipboard APIs. On macOS it watches the pasteboard change counter on a timer; on Windows it is fully event-driven through AddClipboardFormatListener, so it does no polling at all."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does clipaste send my screenshots anywhere?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The HTTP server binds to 127.0.0.1 only and is never exposed to the network. Reaching it from an SSH remote requires an SSH RemoteForward tunnel that you set up yourself; reaching it from WSL2 requires WSL mirrored networking, where loopback is shared with the Windows host. Screenshots are written to a local cache directory and cleaned up after an hour."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which terminals and AI tools does clipaste support?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Terminals: Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty on macOS, and Windows Terminal, PowerShell and cmd.exe on Windows. AI tools: Claude Code, Codex CLI and Cursor CLI. Over SSH and in WSL2, Claude Code and Cursor CLI paste natively with Ctrl+V, while Codex CLI uses the clipaste-paste helper."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is clipaste free and open source?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. clipaste is MIT licensed and the full source is on GitHub at github.com/hqhq1025/clipaste. It is a single Rust binary of roughly 1600 lines covering the macOS pasteboard watcher, the Windows clipboard listener, the local HTTP server and the SSH and WSL setup commands."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <a class="wordmark" href="/clipaste/">clipaste</a>
+    <nav aria-label="Primary">
+      <a href="#why">why</a>
+      <a href="#where">where</a>
+      <a href="#agents">agents</a>
+      <a href="#faq">faq</a>
+      <a class="ext" href="https://github.com/hqhq1025/clipaste">github&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ─────────────────────────  HERO  ───────────────────────── -->
+<section class="hero">
+  <div class="wrap hero-grid">
+
+    <div class="hero-copy">
+      <p class="eyebrow">Rust · MIT · macOS &amp; Windows · v2.4.1</p>
+      <h1>Screenshot paste is broken in terminal AI tools.</h1>
+      <p class="lede">
+        You crop a screenshot, switch to Claude&nbsp;Code, press <kbd>Ctrl</kbd>+<kbd>V</kbd>,
+        and nothing arrives. Over SSH it is worse: the remote has no idea your
+        clipboard exists. clipaste is a 9&nbsp;MB daemon that closes both gaps.
+      </p>
+
+      <div class="install" role="group" aria-label="Install commands">
+        <button class="cmd" type="button" data-copy="brew install hqhq1025/clipaste/clipaste">
+          <span class="os">macOS</span>
+          <code><span class="sigil">$</span> brew install hqhq1025/clipaste/clipaste</code>
+          <span class="copy" aria-hidden="true">copy</span>
+        </button>
+        <button class="cmd" type="button" data-copy="irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex">
+          <span class="os">Windows</span>
+          <code><span class="sigil">&gt;</span> irm …/install.ps1 | iex</code>
+          <span class="copy" aria-hidden="true">copy</span>
+        </button>
+      </div>
+      <p class="fineprint">
+        Then <code>clipaste doctor</code> tells you whether it worked, and what to run if it did not.
+      </p>
+    </div>
+
+    <!-- The demo is the hero image: a terminal that plays the failure, the
+         install, and the fix. Rendered from text so it stays crisp and weighs
+         nothing. -->
+    <div class="hero-demo">
+      <div class="term" role="img" aria-label="Terminal demonstration: pressing Ctrl+V in Claude Code reports no image detected; after installing clipaste, the same keystroke attaches the screenshot.">
+        <div class="term-bar">
+          <span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span>
+          <span class="term-title">ghostty — claude</span>
+        </div>
+        <pre class="term-body" id="demo" aria-hidden="true"></pre>
+      </div>
+      <p class="demo-note" id="demo-note">before → after, on loop</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ─────────────────────────  WHY  ───────────────────────── -->
+<section id="why" class="band" data-index="01">
+  <div class="wrap">
+    <h2>Why <kbd>Ctrl</kbd>+<kbd>V</kbd> does nothing</h2>
+    <div class="reasons">
+      <div class="reason">
+        <p class="rk">the clipboard</p>
+        <p>A macOS screenshot puts <em>raw image bytes</em> on the pasteboard — TIFF or PNG data, and nothing else. No file. No path. Just pixels sitting in memory.</p>
+      </div>
+      <div class="reason">
+        <p class="rk">the terminal</p>
+        <p>Ghostty, Alacritty and friends can paste text and file paths into the program they host. They have no mechanism for handing raw image bytes through. The keystroke arrives empty.</p>
+      </div>
+      <div class="reason">
+        <p class="rk">the ssh boundary</p>
+        <p>A remote shell has no access to your local clipboard whatsoever. There is nothing to paste, so tools fall back to inserting your local file path as literal text.</p>
+      </div>
+    </div>
+
+    <div class="fix">
+      <p class="fix-label">what clipaste does instead</p>
+      <p class="fix-body">
+        It watches the clipboard. The moment a screenshot lands, it writes the bytes to a
+        temporary PNG and puts <em>that file's path</em> on the clipboard next to the image data —
+        something a terminal can pass through. The same PNG is served on
+        <code>127.0.0.1:18340</code>, so a remote that can reach that port through an SSH tunnel
+        can fetch the picture instead of a path that means nothing to it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────  WHERE  ───────────────────────── -->
+<section id="where" class="band" data-index="02">
+  <div class="wrap">
+    <h2>Three places it works</h2>
+
+    <div class="place">
+      <div class="place-head">
+        <h3>On your own machine</h3>
+        <p>Install, and paste. Nothing to configure.</p>
+      </div>
+      <pre class="snip"><code><span class="c">« Cmd+Shift+4 to crop a screenshot »</span>
+<span class="p">$</span> claude
+<span class="g">›</span> what's wrong with this layout?  <span class="k">^V</span>
+  <span class="ok">▸ [Image #1 attached]</span></code></pre>
+    </div>
+
+    <div class="place">
+      <div class="place-head">
+        <h3>On an SSH remote</h3>
+        <p>Run setup once from the machine holding the clipboard, then reconnect.</p>
+      </div>
+      <pre class="snip"><code><span class="c">« on your Mac »</span>
+<span class="p">$</span> clipaste ssh-setup dev@build-07
+<span class="dim">  [1/3] Checking local clipaste server... OK
+  [2/3] Installing helper on dev@build-07... OK (Linux)
+  [3/3] Configuring SSH RemoteForward... OK</span>
+
+<span class="c">« in a NEW session on build-07 »</span>
+<span class="p">$</span> claude
+<span class="g">›</span> why is this test flaky?  <span class="k">^V</span>
+  <span class="ok">▸ [Image #1 attached]</span></code></pre>
+    </div>
+
+    <div class="place">
+      <div class="place-head">
+        <h3>Inside WSL2</h3>
+        <p>No tunnel needed. Setup probes for the Windows host rather than trusting DNS config, so mirrored and NAT networking both work.</p>
+      </div>
+      <pre class="snip"><code><span class="p">$</span> clipaste wsl-setup
+<span class="dim">  [1/2] Locating clipaste on the Windows host...</span>
+        <span class="ok">127.0.0.1 (mirrored-mode loopback)</span>
+<span class="dim">  [2/2] Installing xclip/wl-paste shims... OK</span></code></pre>
+    </div>
+
+    <p class="aside">
+      Codex&nbsp;CLI is the exception, and worth saying plainly: it reads the clipboard
+      in-process through <code>arboard</code>, so it never runs the shim and cannot be
+      intercepted. On a remote, run <code>clipaste-paste</code> — it writes the image to a
+      real file <em>there</em> and prints the path for you to hand over.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────  AGENTS  ───────────────────────── -->
+<section id="agents" class="band" data-index="03">
+  <div class="wrap">
+    <h2>Built to be installed by an agent</h2>
+    <p class="section-lede">
+      Which half of clipaste you need depends on which side of the bridge you are on —
+      and the answer is not <code>uname</code>. An SSH session into a Mac is a remote, not a
+      clipboard host. A human infers that from context; an agent guesses, installs the
+      wrong half, and reports success. So clipaste answers the question directly.
+    </p>
+
+    <div class="agent-grid">
+      <pre class="snip"><code><span class="p">$</span> clipaste doctor --json
+<span class="j">{</span>
+  <span class="jk">"role"</span>: <span class="js">"ssh-remote"</span>,
+  <span class="jk">"status"</span>: <span class="js">"fail"</span>,
+  <span class="jk">"checks"</span>: <span class="j">[</span>
+    <span class="j">{</span> <span class="jk">"name"</span>: <span class="js">"helper"</span>,
+      <span class="jk">"status"</span>: <span class="js">"ok"</span>,
+      <span class="jk">"fix"</span>: <span class="dim">null</span> <span class="j">}</span>,
+    <span class="j">{</span> <span class="jk">"name"</span>: <span class="js">"bridge"</span>,
+      <span class="jk">"status"</span>: <span class="js">"fail"</span>,
+      <span class="jk">"fix"</span>: <span class="js">"reconnect: the SSH
+        RemoteForward is only active
+        inside a session opened
+        after ssh-setup"</span> <span class="j">}</span>
+  <span class="j">]</span>
+<span class="j">}</span></code></pre>
+
+      <ul class="agent-points">
+        <li><b>Every check carries a fix.</b> Not a hint — a literal command the agent can run.</li>
+        <li><b>Roles, not platforms.</b> <code>clipboard-host</code>, <code>ssh-remote</code>, <code>wsl2</code>. Only the relevant checks run.</li>
+        <li><b>Warnings exit 0.</b> "No screenshot staged yet" is a fresh install, not a fault. An agent that treats it as one loops forever.</li>
+        <li><b>Failure modes stay distinct.</b> Helper missing, helper not on PATH, shim shadowed by the real xclip, tunnel down — four different reds, four different fixes.</li>
+        <li><b>Setup is non-interactive and idempotent.</b> Safe to run unattended, safe to run twice.</li>
+      </ul>
+    </div>
+
+    <p class="aside">
+      The repository carries an <a href="https://github.com/hqhq1025/clipaste/blob/main/AGENTS.md">AGENTS.md</a>
+      with the full recipe: which side installs what, the per-tool paste gesture table, and
+      the things not to do — such as binding the daemon to <code>0.0.0.0</code> to "fix"
+      connectivity, when the bytes on that port are the user's screen contents.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────  MATRIX  ───────────────────────── -->
+<section id="matrix" class="band" data-index="04">
+  <div class="wrap">
+    <h2>What works where</h2>
+    <div class="tablewrap">
+      <table>
+        <caption>Paste gesture by tool and location. <span class="dim">helper = run <code>clipaste-paste</code>, then hand over the printed path.</span></caption>
+        <thead>
+          <tr><th scope="col">AI tool</th><th scope="col">Local</th><th scope="col">SSH → Linux</th><th scope="col">SSH → macOS</th><th scope="col">WSL2</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Claude Code</th><td class="y">Ctrl+V</td><td class="y">Ctrl+V</td><td class="h">helper</td><td class="y">Ctrl+V</td></tr>
+          <tr><th scope="row">Cursor CLI</th><td class="y">Ctrl+V</td><td class="y">Ctrl+V</td><td class="h">helper</td><td class="y">Ctrl+V</td></tr>
+          <tr><th scope="row">Codex CLI</th><td class="y">Ctrl+V</td><td class="h">helper</td><td class="h">helper</td><td class="h">helper</td></tr>
+        </tbody>
+      </table>
+      <table>
+        <caption>Terminals verified on the clipboard host.</caption>
+        <thead>
+          <tr><th scope="col">Terminal</th><th scope="col">macOS Cmd+V</th><th scope="col">macOS Ctrl+V</th><th scope="col">Windows Ctrl+V</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Ghostty</th><td class="y">yes</td><td class="y">yes</td><td class="n">—</td></tr>
+          <tr><th scope="row">Alacritty</th><td class="y">yes</td><td class="y">yes</td><td class="n">—</td></tr>
+          <tr><th scope="row">iTerm2</th><td class="y">yes</td><td class="y">yes</td><td class="n">—</td></tr>
+          <tr><th scope="row">Terminal.app</th><td class="y">yes</td><td class="y">yes</td><td class="n">—</td></tr>
+          <tr><th scope="row">WezTerm</th><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
+          <tr><th scope="row">Kitty</th><td class="y">yes</td><td class="y">yes</td><td class="y">yes</td></tr>
+          <tr><th scope="row">Windows Terminal</th><td class="n">—</td><td class="n">—</td><td class="y">yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────  FAQ  ───────────────────────── -->
+<section id="faq" class="band" data-index="05">
+  <div class="wrap">
+    <h2>Questions people actually ask</h2>
+    <div class="faq">
+
+      <article>
+        <h3>Why does <kbd>Ctrl</kbd>+<kbd>V</kbd> do nothing when I paste a screenshot into Claude Code?</h3>
+        <p>A macOS screenshot puts only raw image data on the clipboard — TIFF or PNG bytes. Terminals such as Ghostty and Alacritty can paste text and file paths, but they have no way to hand raw image bytes to the program running inside them, so the keystroke reaches the AI tool carrying nothing. clipaste writes the screenshot to a temporary PNG and puts that file's path on the clipboard alongside the image data, which <em>is</em> something a terminal can pass through.</p>
+      </article>
+
+      <article>
+        <h3>Can I paste screenshots into Claude Code running on a remote server over SSH?</h3>
+        <p>Yes. Run <code>clipaste ssh-setup user@host</code> from the machine holding the clipboard. It installs an xclip shim on the remote and adds an SSH <code>RemoteForward</code> to your <code>~/.ssh/config</code>, so the remote fetches the image back through the tunnel. Open a <em>new</em> SSH session afterwards, then press <kbd>Ctrl</kbd>+<kbd>V</kbd>. Never press <kbd>Cmd</kbd>+<kbd>V</kbd> in an SSH session: that sends your local file path as text, and the remote agent cannot open a path that does not exist there.</p>
+      </article>
+
+      <article>
+        <h3>Why can't Codex CLI paste images over SSH the way Claude Code can?</h3>
+        <p>Codex CLI reads the clipboard in-process through the <code>arboard</code> crate, which talks to X11 or Wayland directly and never runs the <code>xclip</code> binary. It therefore bypasses the shim clipaste installs, and there is no environment variable to redirect it. clipaste ships <code>clipaste-paste</code> instead: run it on the remote, and it writes the current clipboard image to a real file there and prints the path. Hand that path to Codex and it attaches the image.</p>
+      </article>
+
+      <article>
+        <h3>Does clipaste work in WSL2?</h3>
+        <p>Yes. Run <code>clipaste wsl-setup</code> inside the distro while <code>clipaste.exe</code> runs on Windows. Setup probes several candidate addresses for the Windows host and keeps the first that answers, so <code>networkingMode=mirrored</code> (host reachable at <code>127.0.0.1</code>) and the default NAT mode both work. Under mirrored networking with DNS tunnelling the <code>/etc/resolv.conf</code> nameserver is a virtual DNS endpoint rather than the host — which is exactly why probing beats reading DNS config.</p>
+      </article>
+
+      <article>
+        <h3>How does a coding agent install and verify clipaste without guessing?</h3>
+        <p>Run <code>clipaste doctor --json</code>. It classifies the machine as <code>clipboard-host</code>, <code>ssh-remote</code> or <code>wsl2</code>, runs only the checks meaningful for that role, and returns each check as <code>name</code>, <code>status</code>, <code>detail</code> and <code>fix</code> — where <code>fix</code> is a literal command. Exit code is <code>0</code> when usable, <code>1</code> when broken, <code>2</code> on bad arguments.</p>
+      </article>
+
+      <article>
+        <h3>How much memory and CPU does clipaste use?</h3>
+        <p>About 9&nbsp;MB resident, and no measurable CPU when idle. It is Rust with no runtime dependencies beyond the OS clipboard APIs. On macOS it watches the pasteboard change counter on a timer; on Windows it is fully event-driven through <code>AddClipboardFormatListener</code>, so it does not poll at all.</p>
+      </article>
+
+      <article>
+        <h3>Does clipaste send my screenshots anywhere?</h3>
+        <p>No. The HTTP server binds to <code>127.0.0.1</code> only and is never exposed to the network. Reaching it from an SSH remote requires a tunnel you set up yourself; reaching it from WSL2 requires mirrored networking, where loopback is shared with the Windows host. Screenshots are written to a local cache directory and cleaned up after an hour.</p>
+      </article>
+
+      <article>
+        <h3>Is clipaste free and open source?</h3>
+        <p>Yes — MIT licensed, source at <a href="https://github.com/hqhq1025/clipaste">github.com/hqhq1025/clipaste</a>. It is a single Rust binary of roughly 1,600 lines: the macOS pasteboard watcher, the Windows clipboard listener, the loopback HTTP server, and the SSH and WSL setup commands.</p>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section class="closer">
+  <div class="wrap">
+    <p class="closer-line">Take a screenshot. Press paste. It arrives.</p>
+    <div class="install closer-install">
+      <button class="cmd" type="button" data-copy="brew install hqhq1025/clipaste/clipaste">
+        <span class="os">macOS</span>
+        <code><span class="sigil">$</span> brew install hqhq1025/clipaste/clipaste</code>
+        <span class="copy" aria-hidden="true">copy</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <p class="foot-mark">clipaste</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/hqhq1025/clipaste">Source</a>
+      <a href="https://github.com/hqhq1025/clipaste/issues">Issues</a>
+      <a href="https://github.com/hqhq1025/clipaste/releases">Releases</a>
+      <a href="https://github.com/hqhq1025/clipaste/blob/main/AGENTS.md">AGENTS.md</a>
+      <a href="llms.txt">llms.txt</a>
+      <a href="https://github.com/hqhq1025/clipaste/blob/main/LICENSE">MIT</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>

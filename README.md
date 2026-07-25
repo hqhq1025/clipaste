@@ -2,6 +2,8 @@
 
 Fix screenshot paste in terminal AI tools — locally, over SSH, and in WSL2.
 
+**[hqhq1025.github.io/clipaste](https://hqhq1025.github.io/clipaste/)** · [AGENTS.md](AGENTS.md) · [Issues](https://github.com/hqhq1025/clipaste/issues)
+
 **clipaste** is a lightweight clipboard daemon for developers who use terminal-based AI coding tools like Claude Code, Codex CLI, and Cursor. Install with one command via Homebrew (macOS) or PowerShell (Windows), and screenshot paste just works — in Ghostty, Alacritty, iTerm2, Kitty, WezTerm, and more. It also bridges your clipboard to remote servers over SSH and to WSL2 environments. Written in Rust, clipaste uses only 9 MB of RAM with 0% CPU overhead.
 
 **Problem:** You take a screenshot, switch to Claude Code / Codex / Cursor in your terminal, press **Ctrl+V** — nothing happens. Or you're SSH'd into a remote server and can't paste screenshots at all.

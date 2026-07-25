@@ -1,0 +1,682 @@
+/* ══════════════════════════════════════════════════════════════════
+   clipaste — terminal-native dark
+   ------------------------------------------------------------------
+   Direction: you are reading an editor buffer, not a marketing page.
+   Everything is monospace. There are no cards and no shadows; depth
+   comes from luminance steps and hairlines, which is the only depth
+   cue that reads on a near-black canvas. The single accent is the
+   green of a live prompt, with amber reserved for the failure state
+   the product exists to remove.
+
+   Radius scale is committed and deliberately small: 0 everywhere,
+   4px for inline code, 8px for the terminal chrome. Square by intent.
+   ══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Neutrals are tinted toward the accent hue at chroma 0.006 — faint
+     enough to read as grey, present enough to feel like one system. */
+  --canvas:      oklch(0.155 0.006 152);
+  --canvas-2:    oklch(0.185 0.007 152);
+  --raise-1:     oklch(1 0 0 / 0.024);
+  --raise-2:     oklch(1 0 0 / 0.045);
+  --line:        oklch(1 0 0 / 0.085);
+  --line-soft:   oklch(1 0 0 / 0.05);
+
+  --ink:         oklch(0.915 0.006 152);
+  --ink-2:       oklch(0.705 0.008 152);
+  --ink-3:       oklch(0.545 0.008 152);
+
+  --green:       oklch(0.815 0.155 150);
+  --green-dim:   oklch(0.62 0.11 150);
+  --amber:       oklch(0.795 0.135 72);
+
+  --r-code: 4px;
+  --r-term: 8px;
+
+  /* One responsive spacing ladder. Tune the page by scaling this set,
+     never by nudging one gap. */
+  --s1: 0.5rem;
+  --s2: 0.875rem;
+  --s3: 1.5rem;
+  --s4: 2.5rem;
+  --s5: 4rem;
+  --s6: 6.5rem;
+
+  --mono: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --display: "Martian Mono", "Spline Sans Mono", ui-monospace, monospace;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (max-width: 720px) {
+  :root { --s5: 2.75rem; --s6: 3.75rem; }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.68;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.wrap {
+  width: min(100% - 2.5rem, 1120px);
+  margin-inline: auto;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--green);
+  color: var(--canvas);
+  padding: var(--s1) var(--s2);
+  z-index: 99;
+}
+.skip:focus { left: 0; }
+
+a { color: inherit; }
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+
+code, pre, kbd { font-family: var(--mono); }
+
+code {
+  background: var(--raise-2);
+  border-radius: var(--r-code);
+  padding: 0.08em 0.36em;
+  font-size: 0.92em;
+  color: var(--ink);
+}
+
+kbd {
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: var(--r-code);
+  padding: 0.02em 0.34em;
+  font-size: 0.88em;
+  color: var(--ink-2);
+}
+
+em { font-style: italic; color: var(--ink); }
+b  { font-weight: 600; color: var(--ink); }
+
+/* ─────────────────────────  masthead  ───────────────────────── */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  /* Opaque, not translucent. A blurred glass bar is the banned default here,
+     and 88% alpha without a backdrop filter just lets the page bleed through. */
+  background: var(--canvas);
+  border-bottom: 1px solid var(--line-soft);
+}
+.masthead-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  height: 52px;
+}
+.wordmark {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.012em;
+  text-decoration: none;
+  color: var(--ink);
+}
+.wordmark::before {
+  content: "▍";
+  color: var(--green);
+  margin-right: 0.35em;
+}
+.masthead nav {
+  display: flex;
+  gap: var(--s3);
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.masthead nav a {
+  text-decoration: none;
+  transition: color 140ms var(--ease);
+}
+@media (hover: hover) {
+  .masthead nav a:hover { color: var(--green); }
+}
+.masthead nav .ext { color: var(--ink-2); }
+@media (max-width: 720px) {
+  .masthead nav a:not(.ext) { display: none; }
+}
+
+/* ─────────────────────────  hero  ───────────────────────── */
+
+.hero { padding: var(--s6) 0 var(--s5); }
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: var(--s5);
+  align-items: start;
+}
+@media (max-width: 940px) {
+  .hero-grid { grid-template-columns: 1fr; gap: var(--s4); }
+}
+
+.eyebrow {
+  margin: 0 0 var(--s3);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(28px, 5.4vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+  /* No hard line breaks: at 375px a forced "broken in terminal" is wider than
+     the viewport, and a monospace headline cannot shrink to absorb it. */
+  max-width: 14ch;
+}
+@media (max-width: 940px) {
+  h1 { max-width: none; }
+}
+
+.lede {
+  margin: var(--s3) 0 0;
+  max-width: 46ch;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.fineprint {
+  margin: var(--s2) 0 0;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* ─────────────────────────  install buttons  ─────────────────────────
+   Not pills, not filled CTAs: they are command lines you can click.
+   The affordance is the "copy" label at the trailing edge, which
+   swaps in place to a green "copied" on success. */
+
+.install {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin-top: var(--s4);
+}
+
+.cmd {
+  display: grid;
+  grid-template-columns: 62px 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-height: 46px;
+  padding: 0 var(--s2) 0 0;
+  background: var(--raise-1);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms var(--ease), background-color 160ms var(--ease);
+}
+.cmd .os {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.cmd code {
+  background: none;
+  padding: 0;
+  font-size: 13.5px;
+  /* Grid children default to min-width:auto, so a nowrap command would push
+     the track wider than the viewport instead of clipping inside it. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.cmd .sigil { color: var(--green); margin-right: 0.5em; }
+.cmd .copy {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 160ms var(--ease);
+}
+@media (hover: hover) {
+  .cmd:hover { border-color: var(--green-dim); background: var(--raise-2); }
+  .cmd:hover .copy { color: var(--ink-2); }
+}
+.cmd:active { scale: 0.995; }
+.cmd.copied { border-color: var(--green); }
+.cmd.copied .copy { color: var(--green); }
+
+@media (max-width: 560px) {
+  /* Guarantee fit rather than truncate. A clipped "…/clipaste/c" reads as a
+     rendering bug; a command line that wraps reads as a command line. */
+  .cmd {
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    padding: var(--s2);
+    row-gap: var(--s1);
+  }
+  .cmd .os {
+    grid-column: 1;
+    justify-content: flex-start;
+    border-right: none;
+  }
+  .cmd .copy { grid-column: 2; grid-row: 1; }
+  .cmd code {
+    grid-column: 1 / -1;
+    font-size: 12.5px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.6;
+  }
+}
+
+/* ─────────────────────────  terminal  ───────────────────────── */
+
+.term {
+  background: var(--canvas-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-term);
+  overflow: hidden;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 var(--s2);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--raise-1);
+}
+.term-dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--raise-2);
+  border: 1px solid var(--line);
+}
+.term-title {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.term-body {
+  margin: 0;
+  padding: var(--s3) var(--s3) var(--s4);
+  min-height: 268px;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-2);
+}
+@media (max-width: 480px) {
+  .term-body { font-size: 11.5px; padding: var(--s2); min-height: 236px; }
+}
+
+/* Demo token colours, emitted by app.js */
+.t-c   { color: var(--ink-3); font-style: italic; }
+.t-p   { color: var(--green); }
+.t-g   { color: var(--green-dim); }
+.t-k   { color: var(--ink); background: var(--raise-2); padding: 0 0.3em; }
+.t-err { color: var(--amber); }
+.t-ok  { color: var(--green); }
+.t-dim { color: var(--ink-3); }
+
+.cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  vertical-align: -0.18em;
+  background: var(--green);
+  animation: blink 1.05s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.demo-note {
+  margin: var(--s2) 0 0;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor { animation: none; }
+}
+
+/* ─────────────────────────  bands + gutter  ─────────────────────────
+   The section index in the left gutter is the page's signature: it
+   frames the whole document as a buffer with line numbers rather than
+   a stack of marketing sections. */
+
+.band {
+  position: relative;
+  padding: var(--s6) 0;
+  border-top: 1px solid var(--line-soft);
+}
+/* The section index is the page's signature: it frames the document as a
+   buffer with line numbers rather than a stack of marketing sections. It sits
+   in normal flow, aligned to the content column, so it is present at every
+   width — a signature parked in an outer gutter only exists on wide monitors,
+   which means most readers never see it. */
+.band::before {
+  content: attr(data-index);
+  display: block;
+  width: min(100% - 2.5rem, 1120px);
+  margin: 0 auto var(--s2);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+}
+.band::after {
+  content: "";
+  display: block;
+  width: min(100% - 2.5rem, 1120px);
+  margin: 0 auto;
+}
+
+/* Scroll targets must clear the sticky masthead. */
+.band, .hero, .closer { scroll-margin-top: 52px; }
+
+h2 {
+  margin: 0 0 var(--s4);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(22px, 3vw, 30px);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.012em;
+  line-height: 1.4;
+}
+
+.section-lede {
+  margin: calc(var(--s4) * -0.6) 0 var(--s4);
+  max-width: 68ch;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+/* ─────────────────────────  why  ───────────────────────── */
+
+.reasons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s4);
+}
+@media (max-width: 860px) {
+  .reasons { grid-template-columns: 1fr; gap: var(--s3); }
+}
+.reason p { margin: 0; color: var(--ink-2); text-wrap: pretty; }
+.reason .rk {
+  margin-bottom: var(--s1);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--line);
+  color: var(--green-dim);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.fix {
+  margin-top: var(--s5);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+.fix-label {
+  margin: 0 0 var(--s2);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+.fix-body {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 16px;
+  text-wrap: pretty;
+}
+
+/* ─────────────────────────  where  ───────────────────────── */
+
+.place {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: var(--s4);
+  align-items: start;
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--line-soft);
+}
+.place:first-of-type { border-top: none; padding-top: 0; }
+@media (max-width: 860px) {
+  .place { grid-template-columns: 1fr; gap: var(--s2); }
+}
+.place-head p {
+  margin: var(--s1) 0 0;
+  color: var(--ink-3);
+  font-size: 14px;
+  text-wrap: pretty;
+}
+
+.snip {
+  margin: 0;
+  padding: var(--s3);
+  background: var(--canvas-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-term);
+  font-size: 12.5px;
+  line-height: 1.8;
+  min-width: 0;
+  overflow-x: auto;
+  color: var(--ink-2);
+}
+.snip code { background: none; padding: 0; font-size: inherit; }
+.snip .c   { color: var(--ink-3); font-style: italic; }
+.snip .p   { color: var(--green); }
+.snip .g   { color: var(--green-dim); }
+.snip .k   { color: var(--ink); background: var(--raise-2); padding: 0 0.3em; border-radius: 3px; }
+.snip .ok  { color: var(--green); }
+.snip .dim { color: var(--ink-3); }
+.snip .j   { color: var(--ink-3); }
+.snip .jk  { color: var(--ink-2); }
+.snip .js  { color: var(--green-dim); }
+
+.aside {
+  margin: var(--s4) 0 0;
+  max-width: 74ch;
+  color: var(--ink-3);
+  font-size: 14px;
+  text-wrap: pretty;
+}
+.aside a { color: var(--green-dim); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+@media (hover: hover) { .aside a:hover { color: var(--green); } }
+
+/* ─────────────────────────  agents  ───────────────────────── */
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1fr);
+  gap: var(--s4);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .agent-grid { grid-template-columns: 1fr; }
+}
+.agent-points {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.agent-points li {
+  padding-left: 1.4em;
+  position: relative;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.agent-points li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--green-dim);
+}
+
+/* ─────────────────────────  tables  ───────────────────────── */
+
+.tablewrap {
+  display: grid;
+  gap: var(--s5);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+caption {
+  text-align: left;
+  padding-bottom: var(--s2);
+  color: var(--ink-3);
+  font-size: 12px;
+}
+th, td {
+  padding: 0.62rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line-soft);
+  white-space: nowrap;
+}
+thead th {
+  border-bottom-color: var(--line);
+  color: var(--ink-3);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+tbody th {
+  font-weight: 600;
+  color: var(--ink);
+}
+td.y { color: var(--green); }
+td.h { color: var(--amber); }
+td.n { color: var(--ink-3); }
+
+@media (max-width: 720px) {
+  .tablewrap { overflow-x: auto; }
+  table { min-width: 520px; }
+}
+
+/* ─────────────────────────  faq  ───────────────────────── */
+
+.faq {
+  display: grid;
+  gap: 0;
+  max-width: 76ch;
+}
+.faq article {
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--line-soft);
+}
+.faq article:first-child { border-top: none; padding-top: 0; }
+.faq h3 { margin-bottom: var(--s2); color: var(--ink); }
+.faq p {
+  margin: 0;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+.faq a { color: var(--green-dim); text-underline-offset: 3px; }
+@media (hover: hover) { .faq a:hover { color: var(--green); } }
+
+/* ─────────────────────────  closer + footer  ───────────────────────── */
+
+.closer {
+  padding: var(--s6) 0;
+  border-top: 1px solid var(--line-soft);
+}
+.closer-line {
+  margin: 0 0 var(--s4);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(20px, 3.2vw, 30px);
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.closer-install { max-width: 480px; margin-top: 0; }
+
+footer {
+  border-top: 1px solid var(--line-soft);
+  padding: var(--s3) 0 calc(var(--s3) + env(safe-area-inset-bottom));
+}
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.foot-mark {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  color: var(--ink-2);
+}
+.foot nav { display: flex; flex-wrap: wrap; gap: var(--s3); }
+.foot nav a { text-decoration: none; transition: color 140ms var(--ease); }
+@media (hover: hover) { .foot nav a:hover { color: var(--green); } }

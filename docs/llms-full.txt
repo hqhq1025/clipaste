@@ -1,0 +1,297 @@
+# clipaste — full reference
+
+Homepage: https://hqhq1025.github.io/clipaste/
+Source: https://github.com/hqhq1025/clipaste
+License: MIT
+Version: 2.4.1
+Language: Rust
+Author: Haoqing Wang (https://github.com/hqhq1025)
+
+---
+
+## What clipaste is
+
+clipaste is a clipboard daemon that makes screenshot paste work in terminal-based AI
+coding tools — Claude Code, Codex CLI and Cursor CLI — on macOS and Windows, and bridges
+the clipboard to SSH remotes and WSL2 environments. It uses about 9 MB of resident memory
+and has no measurable idle CPU cost.
+
+---
+
+## The problem, precisely
+
+Three separate failures are usually reported as one:
+
+1. **The clipboard carries the wrong shape of data.** A macOS screenshot places raw image
+   bytes on the pasteboard — TIFF or PNG data. There is no file on disk and no path.
+
+2. **The terminal cannot pass image bytes through.** Ghostty, Alacritty, iTerm2 and
+   similar terminals can paste text and file paths into the program they host. They have
+   no mechanism for handing raw image bytes to that program. Pressing Ctrl+V sends
+   nothing, so the AI tool reports "no image detected".
+
+3. **An SSH remote has no clipboard at all.** The remote machine cannot see your local
+   pasteboard. Tools fall back to inserting your local file path as literal text, and the
+   remote agent cannot open a path that does not exist on its filesystem.
+
+---
+
+## How clipaste solves it
+
+**Locally.** A background daemon watches the clipboard. When a screenshot appears, it
+writes the bytes to a temporary PNG file and puts that file's path on the clipboard
+*alongside* the original image data. A file path is something the terminal can pass
+through, so Cmd+V works; the retained image data plus a legacy PNGf pasteboard type keeps
+Ctrl+V image paste working for tools that read the clipboard directly.
+
+**Over SSH.** The daemon also runs an HTTP server bound to `127.0.0.1:18340` serving three
+endpoints: `/health`, `/clipboard/type` and `/clipboard/image`. `clipaste ssh-setup`
+installs an `xclip`/`wl-paste` shim on the Linux remote and adds
+`RemoteForward 18340 127.0.0.1:18340` to the local `~/.ssh/config`. When Claude Code on
+the remote shells out to `xclip`, the shim answers from the tunnel instead. The image
+never leaves loopback except through the user's own SSH connection.
+
+**In WSL2.** No tunnel is needed; WSL reaches the Windows host directly. `clipaste
+wsl-setup` installs the same shims inside the distro, pointed at clipaste.exe on Windows.
+
+---
+
+## Commands
+
+```
+clipaste                       Run the daemon (clipboard watcher + HTTP server)
+clipaste doctor [--json]       Diagnose this machine and print the fix command
+clipaste ssh-setup user@host   Configure an SSH remote (add -p PORT for a custom SSH port)
+clipaste wsl-setup             Configure WSL2 (add --host IP to skip host auto-detection)
+clipaste --version
+clipaste --help
+```
+
+`ssh-setup` and `wsl-setup` also install a `clipaste-paste` command on the target: it
+fetches the current clipboard image into a real file on that host and prints the path.
+
+---
+
+## Installing
+
+macOS (Homebrew):
+
+```bash
+brew install hqhq1025/clipaste/clipaste
+brew services start clipaste
+```
+
+Windows (PowerShell, no administrator rights required):
+
+```powershell
+irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
+```
+
+The Windows installer downloads the latest release into `%LOCALAPPDATA%\clipaste`, adds it
+to the user PATH, registers an `HKCU\...\Run` auto-start entry, and launches the daemon.
+
+From source:
+
+```bash
+git clone https://github.com/hqhq1025/clipaste.git
+cd clipaste && cargo build --release
+```
+
+---
+
+## SSH remote setup, in detail
+
+Run on the machine that holds the clipboard, not on the remote:
+
+```bash
+clipaste ssh-setup user@your-server
+clipaste ssh-setup user@your-server -p 22222   # custom SSH port
+```
+
+The command:
+
+- verifies the local daemon is answering on `127.0.0.1:18340`
+- detects the remote OS with `uname -s` in a single SSH round trip
+- on a Linux remote, installs `~/.local/bin/xclip` and `~/.local/bin/wl-paste` shims
+- on every remote, installs `~/.local/bin/clipaste-paste`
+- ensures `~/.local/bin` is on PATH, creating the login shell's rc file if none exists
+- adds `RemoteForward 18340 127.0.0.1:18340` (and `Port` when `-p` was given) to the
+  matching host block in `~/.ssh/config`, without duplicating or overriding existing
+  directives
+
+The `RemoteForward` only exists in SSH sessions opened *after* the config change, so the
+user must reconnect before pasting.
+
+On a **macOS remote**, the xclip shims are deliberately not installed: nothing on macOS
+shells out to xclip, so the shims would be dead code. `clipaste-paste` is the supported
+path there.
+
+---
+
+## WSL2 setup, in detail
+
+Run inside the WSL2 distro with clipaste.exe already running on Windows:
+
+```bash
+clipaste wsl-setup
+clipaste wsl-setup --host 127.0.0.1   # skip auto-detection
+```
+
+Host detection probes candidate addresses and keeps the first that actually serves
+`/health`:
+
+| WSL networking mode | Windows host reachable at | Why |
+|---|---|---|
+| `mirrored` | `127.0.0.1` | WSL shares the host's network interfaces, including loopback |
+| `nat` (default) | the vEthernet gateway | usually the `/etc/resolv.conf` nameserver; read from the routing table when DNS tunnelling replaces it |
+
+Detection order is decided by `wslinfo --networking-mode` when that tool is available, but
+every candidate is probed regardless, so an older WSL without `wslinfo` still lands on the
+right address. Under `networkingMode=mirrored` with `dnsTunneling=true`, the resolv.conf
+nameserver is a virtual DNS endpoint (typically `10.255.255.254`) and is *not* the host —
+which is why probing beats reading DNS configuration.
+
+clipaste binds to `127.0.0.1` on Windows. NAT-mode WSL cannot reach a loopback-bound
+service on the host. The supported fix is `networkingMode=mirrored` in
+`%USERPROFILE%\.wslconfig` (Windows 11 22H2 and later). Where mirrored mode is
+unavailable, forward the port on the Windows side with `netsh interface portproxy`.
+
+---
+
+## Paste gestures
+
+| Tool | Local | SSH → Linux | SSH → macOS | WSL2 |
+|---|---|---|---|---|
+| Claude Code | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
+| Cursor CLI | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
+| Codex CLI | Ctrl+V | `clipaste-paste` | `clipaste-paste` | `clipaste-paste` |
+
+On macOS locally, Cmd+V also works — that is the case the file-path trick was built for.
+
+**Codex CLI is the standing exception.** It reads the clipboard in-process through the
+`arboard` crate, which talks to X11 or Wayland directly and never executes the `xclip`
+binary. There is no environment variable or external-command hook to redirect it, so a
+shim cannot intercept it. `clipaste-paste` writes the image to a real file on the current
+host and prints the path; hand that path to Codex and it attaches the image.
+
+**Never press Cmd+V in an SSH session.** It transmits your local file path as text. The
+remote agent will read it as a string and fail to open it.
+
+---
+
+## Diagnostics for coding agents
+
+```bash
+clipaste doctor --json
+```
+
+```json
+{
+  "version": "2.4.1",
+  "os": "linux",
+  "role": "ssh-remote",
+  "status": "fail",
+  "checks": [
+    { "name": "helper", "status": "ok", "detail": "~/.local/bin/clipaste-paste", "fix": null },
+    { "name": "bridge", "status": "fail",
+      "detail": "http://127.0.0.1:18340 is not answering",
+      "fix": "reconnect: the SSH RemoteForward is only active inside a session opened after ssh-setup" }
+  ]
+}
+```
+
+Contract:
+
+- `role` is `clipboard-host`, `ssh-remote` or `wsl2`, and decides which checks run.
+  Detection order is WSL markers, then SSH variables, then platform — because a WSL distro
+  is also Linux, and an SSH session into a Mac is a remote rather than a clipboard host.
+- `status` is the worst of all checks: `ok`, `warn` or `fail`.
+- `checks[].fix` is a literal command, or `null`.
+- Exit code is `0` when usable (including warnings), `1` when broken, `2` on bad arguments.
+- A `warn` is not a failure. "No screenshot staged yet" is the normal state of a fresh
+  install; treating it as a fault causes an agent to loop.
+
+Checks distinguish failure modes that look identical from outside: helper missing, helper
+installed but not on PATH, shim shadowed by the real `xclip`, tunnel down, and a stale
+daemon still owning the port after an upgrade.
+
+The repository also ships an `AGENTS.md` with the full install recipe, a diagram of which
+side installs what, the paste-gesture table, and the actions an agent should not take —
+notably binding the daemon to `0.0.0.0` to "fix" connectivity, when the bytes served on
+that port are the user's screen contents.
+
+---
+
+## Compatibility
+
+Terminals on the clipboard host: Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm and
+Kitty on macOS; Windows Terminal, PowerShell and cmd.exe on Windows. WezTerm and Kitty
+also cover Windows Ctrl+V.
+
+Remotes: any Linux server reachable over SSH that has `curl`. WSL2 distros including
+Ubuntu, Debian, Fedora, Arch and Kali. macOS remotes are supported through
+`clipaste-paste`.
+
+---
+
+## Privacy and security
+
+- The HTTP server binds to `127.0.0.1` and is never exposed on a network interface.
+- Reaching it from an SSH remote requires an SSH RemoteForward tunnel the user sets up.
+- Reaching it from WSL2 requires mirrored networking, where loopback is shared with the
+  Windows host.
+- Screenshots are written to a local cache directory (`~/.cache/clipaste` on macOS and
+  Linux, `%LOCALAPPDATA%` on Windows) and files older than one hour are removed.
+- No telemetry, no network calls other than serving the local endpoints.
+
+---
+
+## Implementation notes
+
+- **macOS**: an `NSTimer` on the run loop watches `NSPasteboard.changeCount`. When the
+  clipboard holds image data with no file URL or string, the daemon rewrites it with the
+  temp-file URL plus `public.png`, `com.apple.pboard.type.PNGf` and a plain-text path.
+  When the clipboard instead holds a *file URL* pointing at an image (a screenshot saved
+  to disk and then copied in Finder), the file is captured for remote serving without
+  touching the local clipboard.
+- **Windows**: fully event-driven. A hidden `HWND_MESSAGE` window registers via
+  `AddClipboardFormatListener` and handles `WM_CLIPBOARDUPDATE`, de-duplicated with
+  `GetClipboardSequenceNumber`. `CF_DIB` is converted to PNG and the path written back as
+  `CF_UNICODETEXT`. There is no polling loop.
+- **HTTP**: a hand-rolled server on the standard library's `TcpListener`. No web framework.
+- **Dependencies**: only the `image` crate for format conversion, plus `objc2` on macOS and
+  `windows-sys` on Windows. HTTP requests made by the CLI shell out to `curl`.
+
+---
+
+## Frequently asked questions
+
+**Why does Ctrl+V do nothing when I paste a screenshot into Claude Code?**
+A macOS screenshot puts only raw image data on the clipboard. Terminals can paste text and
+file paths but cannot hand raw image bytes to the program they host, so the keystroke
+arrives empty. clipaste writes the screenshot to a temp PNG and puts that path on the
+clipboard alongside the image data.
+
+**Can I paste screenshots into Claude Code running on a remote server over SSH?**
+Yes. Run `clipaste ssh-setup user@host` from the machine holding the clipboard, then open a
+new SSH session and press Ctrl+V.
+
+**Why can't Codex CLI paste images over SSH the way Claude Code can?**
+Codex reads the clipboard in-process via `arboard` and never runs `xclip`, so it bypasses
+the shim. Use `clipaste-paste` on the remote and hand the printed path to Codex.
+
+**Does clipaste work in WSL2?**
+Yes, in both mirrored and NAT networking modes. Run `clipaste wsl-setup` inside the distro.
+
+**How much memory and CPU does clipaste use?**
+About 9 MB resident and no measurable idle CPU.
+
+**Does clipaste send my screenshots anywhere?**
+No. Loopback only, with no telemetry.
+
+**Which terminals and AI tools are supported?**
+Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, Windows Terminal; Claude Code,
+Codex CLI and Cursor CLI.
+
+**Is clipaste free and open source?**
+Yes, MIT licensed, at github.com/hqhq1025/clipaste.
