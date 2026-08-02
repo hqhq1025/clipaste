@@ -29,12 +29,37 @@ fn file_url_type() -> Retained<NSPasteboardType> {
     pasteboard_type("public.file-url")
 }
 
-fn filenames_type() -> Retained<NSPasteboardType> {
-    pasteboard_type("NSFilenamesPboardType")
-}
-
 fn string_type() -> Retained<NSPasteboardType> {
     pasteboard_type("public.utf8-plain-text")
+}
+
+/// Decide, from the pasteboard's type list alone, whether the clipboard holds
+/// raw image bits we should stage.
+///
+/// The list length says nothing about the content. A screenshot advertises two
+/// or three types; an image copied out of a Chromium browser advertises eight —
+/// the same bits under several flavors, plus the source markup and Chromium's
+/// private metadata. What decides it is the presence of image bits together
+/// with the absence of a file reference or plain text, because those two mean
+/// the user copied a *file* or *text* and staging the image would hijack an
+/// ordinary paste.
+fn is_image_only(types: &[String]) -> bool {
+    let mut has_image = false;
+    let mut has_file_url = false;
+    let mut has_filenames = false;
+    let mut has_string = false;
+
+    for t in types {
+        match t.as_str() {
+            "public.png" | "public.tiff" => has_image = true,
+            "public.file-url" => has_file_url = true,
+            "NSFilenamesPboardType" => has_filenames = true,
+            "public.utf8-plain-text" => has_string = true,
+            _ => {}
+        }
+    }
+
+    has_image && !has_file_url && !has_filenames && !has_string
 }
 
 /// Check if clipboard has image data but no file URL or string
@@ -44,36 +69,11 @@ fn is_image_only_clipboard(pb: &NSPasteboard) -> bool {
         None => return false,
     };
 
-    let count = types.count();
-    if count > 6 {
-        return false;
-    }
+    let list: Vec<String> = (0..types.count())
+        .map(|i| types.objectAtIndex(i).to_string())
+        .collect();
 
-    let mut has_image = false;
-    let mut has_file_url = false;
-    let mut has_filenames = false;
-    let mut has_string = false;
-
-    let png = png_type();
-    let tiff = tiff_type();
-    let furl = file_url_type();
-    let fnames = filenames_type();
-    let str_type = string_type();
-
-    for i in 0..count {
-        let t: Retained<NSPasteboardType> = types.objectAtIndex(i);
-        if *t == *png || *t == *tiff {
-            has_image = true;
-        } else if *t == *furl {
-            has_file_url = true;
-        } else if *t == *fnames {
-            has_filenames = true;
-        } else if *t == *str_type {
-            has_string = true;
-        }
-    }
-
-    has_image && !has_file_url && !has_filenames && !has_string
+    is_image_only(&list)
 }
 
 /// Read PNG data from clipboard, converting from TIFF if needed
@@ -300,5 +300,65 @@ pub fn run(latest: common::LatestImage) {
     unsafe {
         run_loop.addTimer_forMode(&timer, NSDefaultRunLoopMode);
         run_loop.run();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_image_only;
+
+    fn types(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn screenshot_is_staged() {
+        assert!(is_image_only(&types(&["public.png", "public.tiff"])));
+    }
+
+    /// An image copied out of a Chromium browser (Brave, Chrome, Edge): the
+    /// same bits under several flavors, plus the source markup and Chromium's
+    /// private metadata. Eight types, no file URL, no plain text — still just
+    /// an image. A cap on the number of types rejected this, so the daemon kept
+    /// serving whatever was staged before and remote paste produced a stale
+    /// screenshot.
+    #[test]
+    fn browser_image_is_staged() {
+        assert!(is_image_only(&types(&[
+            "public.png",
+            "Apple PNG pasteboard type",
+            "public.html",
+            "Apple HTML pasteboard type",
+            "org.chromium.internal.source-rfh-token",
+            "org.chromium.source-url",
+            "public.tiff",
+            "NeXT TIFF v4.0 pasteboard type",
+        ])));
+    }
+
+    /// A copied file is a file, however many flavors accompany it.
+    #[test]
+    fn copied_file_is_not_staged() {
+        assert!(!is_image_only(&types(&["public.file-url", "public.png"])));
+        assert!(!is_image_only(&types(&[
+            "NSFilenamesPboardType",
+            "public.png"
+        ])));
+    }
+
+    /// A web-page selection carries markup and an image alongside the text.
+    /// Staging it would hijack an ordinary text paste.
+    #[test]
+    fn text_selection_is_not_staged() {
+        assert!(!is_image_only(&types(&[
+            "public.utf8-plain-text",
+            "public.html",
+            "public.png"
+        ])));
+    }
+
+    #[test]
+    fn empty_clipboard_is_not_staged() {
+        assert!(!is_image_only(&[]));
     }
 }
