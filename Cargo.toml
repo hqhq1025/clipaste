@@ -1,6 +1,6 @@
 [package]
 name = "clipaste"
-version = "2.4.1"
+version = "2.4.2"
 edition = "2021"
 description = "Fix macOS/Windows screenshot paste in terminal AI tools"
 license = "MIT"
@@ -8,6 +8,7 @@ repository = "https://github.com/hqhq1025/clipaste"
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["tiff", "png", "bmp"] }
+sha2 = "0.10.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -36,6 +37,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_LibraryLoader",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
 ] }
 
 [profile.release]

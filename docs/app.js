@@ -23,7 +23,7 @@
     { out: '« the terminal never had the pixels »', cls: 't-c', pause: 900 },
     { out: '' },
     { type: 'brew install hqhq1025/clipaste/clipaste', prompt: '$ ', pause: 220 },
-    { out: '  ==> Pouring clipaste-2.4.1.arm64_sequoia.bottle', cls: 't-dim', pause: 90 },
+    { out: '  ==> Installing clipaste 2.4.2 from source', cls: 't-dim', pause: 90 },
     { out: '  ==> clipaste daemon started (9 MB)', cls: 't-dim', pause: 780 },
     { out: '' },
     { type: 'why is this layout breaking?  ', prompt: '› ', promptCls: 't-g', pause: 120 },

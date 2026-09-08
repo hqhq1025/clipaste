@@ -3,7 +3,7 @@
 Homepage: https://hqhq1025.github.io/clipaste/
 Source: https://github.com/hqhq1025/clipaste
 License: MIT
-Version: 2.4.1
+Version: 2.4.2
 Language: Rust
 Author: Haoqing Wang (https://github.com/hqhq1025)
 
@@ -241,7 +241,10 @@ Ubuntu, Debian, Fedora, Arch and Kali. macOS remotes are supported through
 - Reaching it from WSL2 requires mirrored networking, where loopback is shared with the
   Windows host.
 - Screenshots are written to a local cache directory (`~/.cache/clipaste` on macOS and
-  Linux, `%LOCALAPPDATA%` on Windows) and files older than one hour are removed.
+  Linux, `%LOCALAPPDATA%/clipaste` on Windows). Identical PNG bytes reuse stable
+  SHA-256 paths. Published files no longer expire automatically, so clipboard
+  history paths remain valid. Disk usage grows with unique images; explicitly
+  deleting cached files invalidates any saved paths that reference them.
 - No telemetry, no network calls other than serving the local endpoints.
 
 ---

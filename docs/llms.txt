@@ -53,7 +53,9 @@ commands are non-interactive and idempotent.
 - ~9 MB resident memory, no measurable idle CPU
 - macOS: NSPasteboard change-counter watcher. Windows: event-driven via `AddClipboardFormatListener`, no polling
 - HTTP server binds to `127.0.0.1` only and is never exposed to the network
-- Screenshots are cached locally and cleaned up after one hour
+- Screenshots use stable local SHA-256 cache paths with no automatic expiry;
+  identical images reuse a path. Storage grows with unique images, and manual
+  deletion invalidates saved paths.
 - WSL2 host detection probes candidate addresses rather than reading `/etc/resolv.conf` alone, so `networkingMode=mirrored` and NAT both work
 - Terminals: Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, Windows Terminal
 

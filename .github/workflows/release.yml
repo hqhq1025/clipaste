@@ -23,7 +23,12 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Test and lint on the runner host
+        run: |
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
 
       - name: Package
         run: |
@@ -45,7 +50,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cargo build --release
+        run: cargo build --locked --release
+
+      - name: Test and lint
+        run: |
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
 
       - name: Package
         shell: bash

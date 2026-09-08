@@ -18,6 +18,16 @@ Fix screenshot paste in terminal AI tools — locally, over SSH, and in WSL2.
 
 ## Install
 
+### Clipboard history and cache
+
+Starting with v2.4.2, macOS normalization preserves source formats and marks
+modified copies so compatible history managers, including Maccy 2.6.1, can
+replace the original entry. Identical PNG bytes reuse a stable cache path.
+Cached images no longer expire automatically after one hour, so saved history
+paths remain usable. Storage grows with unique images; deleting cached files
+invalidates history entries that reference those paths.
+See [clipboard history compatibility](docs/clipboard-history.md) for details.
+
 ### macOS (Homebrew)
 
 ```bash
