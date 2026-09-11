@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  ARCHIVE_VERSION: ${{ github.event_name == 'push' && github.ref_name || format('preflight-{0}', github.sha) }}
+
 jobs:
   build-macos:
     runs-on: macos-latest
@@ -34,13 +37,13 @@ jobs:
       - name: Package
         run: |
           cp target/${{ matrix.target }}/release/clipaste clipaste
-          tar czf clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz clipaste
+          tar czf clipaste-${{ env.ARCHIVE_VERSION }}-${{ matrix.target }}.tar.gz clipaste
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: clipaste-${{ matrix.target }}
-          path: clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          path: clipaste-${{ env.ARCHIVE_VERSION }}-${{ matrix.target }}.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -62,13 +65,13 @@ jobs:
         shell: bash
         run: |
           cp target/release/clipaste.exe clipaste.exe
-          7z a clipaste-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip clipaste.exe
+          7z a clipaste-${{ env.ARCHIVE_VERSION }}-x86_64-pc-windows-msvc.zip clipaste.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: clipaste-windows
-          path: clipaste-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip
+          path: clipaste-${{ env.ARCHIVE_VERSION }}-x86_64-pc-windows-msvc.zip
 
   build-linux:
     runs-on: ${{ matrix.os }}
@@ -110,16 +113,15 @@ jobs:
             echo "Linux release binary must not require a dynamic loader" >&2
             exit 1
           fi
-          tar czf clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz clipaste
+          tar czf clipaste-${{ env.ARCHIVE_VERSION }}-${{ matrix.target }}.tar.gz clipaste
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: clipaste-${{ matrix.target }}
-          path: clipaste-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          path: clipaste-${{ env.ARCHIVE_VERSION }}-${{ matrix.target }}.tar.gz
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
@@ -129,9 +131,13 @@ jobs:
           merge-multiple: true
 
       - name: Checksum release archives
-        run: sha256sum clipaste-*.tar.gz clipaste-*.zip > SHA256SUMS
+        run: |
+          sha256sum clipaste-*.tar.gz clipaste-*.zip > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 5
+          sha256sum --check SHA256SUMS
 
       - name: Create GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
           files: |
