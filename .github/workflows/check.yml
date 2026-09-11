@@ -19,3 +19,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets
+
+  linux-desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install isolated desktop test dependencies
+        run: sudo apt-get update && sudo apt-get install -y xvfb xclip sway wl-clipboard dbus-x11 python3-pil
+      - name: Exercise real X11 and Wayland selections
+        run: bash tests/linux/run.sh

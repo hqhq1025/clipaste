@@ -103,28 +103,42 @@ pub fn detect_role() -> Role {
         is_wsl(),
         is_ssh_session(),
         installed_helper_url(&home().join(".local/bin/clipaste-paste")).is_some(),
+        graphical_session(),
     )
 }
 
-fn classify_role(os: &str, wsl: bool, ssh: bool, configured_consumer: bool) -> Role {
+fn graphical_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::has_display()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
+}
+
+fn classify_role(os: &str, wsl: bool, ssh: bool, configured_consumer: bool, graphical: bool) -> Role {
     if os == "linux" && wsl {
         return Role::Wsl2;
     }
     if ssh {
         return Role::SshRemote;
     }
+    if os == "linux" && configured_consumer && !graphical {
+        return Role::SshRemote;
+    }
     if common::supports_clipboard_host(os) {
         Role::ClipboardHost
     } else if configured_consumer {
-        // A configured Linux consumer may be used outside the original SSH
-        // session (for example from tmux); let bridge checks diagnose its tunnel.
+        // Other unsupported platforms can still use the HTTP consumer helper.
         Role::SshRemote
     } else {
         Role::UnsupportedHost
     }
 }
 
-fn is_wsl() -> bool {
+pub(crate) fn is_wsl() -> bool {
     if std::env::var_os("WSL_DISTRO_NAME").is_some() || std::env::var_os("WSL_INTEROP").is_some() {
         return true;
     }
@@ -301,19 +315,31 @@ fn curl_install_hint() -> &'static str {
     }
 }
 
-fn daemon_start_hint() -> &'static str {
+pub(crate) fn daemon_start_hint() -> &'static str {
     if cfg!(target_os = "macos") {
         "brew services start clipaste"
     } else if cfg!(target_os = "windows") {
         "start clipaste.exe (reinstall: irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex)"
     } else {
-        "clipaste"
+        "run clipaste in your Linux graphical desktop session; leave it running"
     }
 }
 
 fn clipboard_host_checks() -> Vec<Check> {
     let base = format!("http://127.0.0.1:{}", common::DEFAULT_PORT);
     let mut checks = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    match crate::linux::detect() {
+        Ok(backend) => {
+            if let Some(warning) = backend.warning {
+                checks.push(Check::warn("backend", format!("{}; {warning}", backend.detail)));
+            } else {
+                checks.push(Check::ok("backend", backend.detail));
+            }
+        }
+        Err(e) => return vec![Check::fail("backend", e)],
+    }
 
     match common::http_get(&format!("{base}/health")) {
         Some(body) if is_clipaste_health(&body) => {
@@ -561,19 +587,21 @@ mod tests {
     #[test]
     fn native_linux_is_not_assumed_to_be_an_ssh_remote() {
         assert_eq!(
-            classify_role("linux", false, false, false),
-            Role::UnsupportedHost
+            classify_role("linux", false, false, false, false),
+            Role::ClipboardHost
         );
     }
 
     #[test]
     fn role_detection_preserves_existing_consumers_and_supported_hosts() {
-        assert_eq!(classify_role("linux", false, true, false), Role::SshRemote);
-        assert_eq!(classify_role("linux", false, false, true), Role::SshRemote);
-        assert_eq!(classify_role("linux", true, true, true), Role::Wsl2);
-        assert_eq!(classify_role("macos", false, true, true), Role::SshRemote);
-        assert_eq!(classify_role("macos", false, false, true), Role::ClipboardHost);
-        assert_eq!(classify_role("windows", true, false, true), Role::ClipboardHost);
+        assert_eq!(classify_role("linux", false, true, false, true), Role::SshRemote);
+        assert_eq!(classify_role("linux", false, false, true, false), Role::SshRemote);
+        assert_eq!(classify_role("linux", false, false, true, true), Role::ClipboardHost);
+        assert_eq!(classify_role("linux", true, true, true, true), Role::Wsl2);
+        assert_eq!(classify_role("macos", false, true, true, true), Role::SshRemote);
+        assert_eq!(classify_role("macos", false, false, true, true), Role::ClipboardHost);
+        assert_eq!(classify_role("windows", true, false, true, true), Role::ClipboardHost);
+        assert_eq!(classify_role("freebsd", false, false, false, false), Role::UnsupportedHost);
     }
 
     #[test]
@@ -586,7 +614,7 @@ mod tests {
         let json = render_json(&report);
         assert!(json.contains("\"role\":\"unsupported-host\""));
         assert!(json.contains("\"status\":\"fail\""));
-        assert!(json.contains("macOS or Windows"));
+        assert!(json.contains("macOS, Windows, or a Linux desktop"));
         let human = render_human(&report);
         assert!(human.contains("clipaste ssh-setup"));
         assert!(!human.contains("run the → commands"));

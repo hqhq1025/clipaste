@@ -4,23 +4,19 @@ use std::net::TcpListener;
 
 /// Start HTTP server in a background thread.
 /// Serves the latest screenshot PNG on GET /clipboard/image.
-pub fn start(latest: LatestImage) {
+pub fn start(latest: LatestImage) -> std::io::Result<()> {
+    let addr = format!("127.0.0.1:{}", common::DEFAULT_PORT);
+    // Bind before the watcher starts, so a stale daemon/tunnel cannot be mistaken
+    // for this process's successfully published clipboard.
+    let listener = TcpListener::bind(&addr)?;
+    common::log(&format!("http server listening on {addr}"));
     std::thread::spawn(move || {
-        let addr = format!("127.0.0.1:{}", common::DEFAULT_PORT);
-        let listener = match TcpListener::bind(&addr) {
-            Ok(l) => l,
-            Err(e) => {
-                common::log(&format!("http server failed to bind {addr}: {e}"));
-                return;
-            }
-        };
-        common::log(&format!("http server listening on {addr}"));
-
         for stream in listener.incoming().flatten() {
             let latest = latest.clone();
             std::thread::spawn(move || handle_request(stream, latest));
         }
     });
+    Ok(())
 }
 
 fn handle_request(mut stream: std::net::TcpStream, latest: LatestImage) {

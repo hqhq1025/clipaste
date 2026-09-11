@@ -318,7 +318,7 @@ pub fn run_ssh(host: &str, ssh_port: Option<u16>) {
     if !check_health(&format!("http://127.0.0.1:{}", common::DEFAULT_PORT)) {
         println!("FAILED");
         eprintln!("  clipaste daemon is not running. Start it first:");
-        eprintln!("  brew services start clipaste");
+        eprintln!("  {}", crate::doctor::daemon_start_hint());
         std::process::exit(1);
     }
     println!("OK");
@@ -354,7 +354,7 @@ pub fn run_ssh(host: &str, ssh_port: Option<u16>) {
     println!();
     println!("Setup complete!");
     println!("  1. Open a NEW SSH session: ssh {host}");
-    println!("  2. Take a screenshot (or copy an image file) on your Mac");
+    println!("  2. Copy a screenshot/image to the clipboard on your local computer");
     if remote_os == "Darwin" {
         // macOS remote: xclip/wl-paste don't apply; tools read the *remote*
         // (empty) pasteboard. The clipaste-paste helper is the working path.
@@ -1142,4 +1142,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 }
-
