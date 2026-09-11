@@ -50,6 +50,12 @@ fn main() {
         return;
     }
 
+    #[cfg(target_os = "linux")]
+    if let Err(e) = linux::install_signal_handlers() {
+        eprintln!("clipaste: cannot install stop handlers: {e}");
+        std::process::exit(1);
+    }
+
     // clipaste doctor [--json] — diagnose this machine and print the fix
     if args.len() >= 2 && args[1] == "doctor" {
         let json = args[2..].iter().any(|a| a == "--json");
@@ -65,13 +71,10 @@ fn main() {
     require_clipboard_host();
 
     #[cfg(target_os = "linux")]
-    let backend = linux::install_signal_handlers()
-        .map_err(|e| e.to_string())
-        .and_then(|_| linux::detect())
-        .unwrap_or_else(|e| {
-            eprintln!("clipaste: {e}");
-            std::process::exit(1);
-        });
+    let backend = linux::detect().unwrap_or_else(|e| {
+        eprintln!("clipaste: {e}");
+        std::process::exit(1);
+    });
 
     // Start HTTP server for remote access
     let latest = common::LatestImage::default();

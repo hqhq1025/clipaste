@@ -367,12 +367,25 @@ fn normal_stop_cleans_up_a_hung_clipboard_process_group() {
     if wsl_kernel() {
         return;
     }
+    for args in [vec![], vec!["doctor", "--json"]] {
+        for signal in [libc::SIGINT, libc::SIGTERM] {
+            stop_hung_command(&args, signal);
+        }
+    }
+}
+
+fn stop_hung_command(args: &[&str], signal: libc::c_int) {
     let home = TestHome::new();
     home.script(
         "xclip",
         "#!/bin/sh\n/bin/sleep 30 &\nprintf '%s %s' \"$$\" \"$!\" > \"$HOME/children\"\nwait\n",
     );
-    let mut daemon = home.command().env("DISPLAY", ":999").spawn().unwrap();
+    let mut daemon = home
+        .command()
+        .args(args)
+        .env("DISPLAY", ":999")
+        .spawn()
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     let children = home.0.join("children");
     while !children.exists() && Instant::now() < deadline {
@@ -385,7 +398,7 @@ fn normal_stop_cleans_up_a_hung_clipboard_process_group() {
     }
     // The readiness file is written by the hung command, not by a timed guess.
     let pids = fs::read_to_string(children).unwrap();
-    unsafe { libc::kill(daemon.id() as i32, libc::SIGTERM) };
+    unsafe { libc::kill(daemon.id() as i32, signal) };
     let deadline = Instant::now() + Duration::from_secs(2);
     while daemon.try_wait().unwrap().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));

@@ -27,7 +27,9 @@ extern "C" fn stop_signal(_: libc::c_int) {
 pub fn install_signal_handlers() -> io::Result<()> {
     for signal in [libc::SIGINT, libc::SIGTERM] {
         // SAFETY: the handler only sets an atomic flag; normal code owns cleanup.
-        if unsafe { libc::signal(signal, stop_signal as libc::sighandler_t) } == libc::SIG_ERR {
+        if unsafe { libc::signal(signal, stop_signal as *const () as libc::sighandler_t) }
+            == libc::SIG_ERR
+        {
             return Err(io::Error::last_os_error());
         }
     }
