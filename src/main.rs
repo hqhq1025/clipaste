@@ -1,9 +1,9 @@
 mod common;
 mod doctor;
-mod server;
-mod ssh_setup;
 #[cfg(target_os = "macos")]
 mod macos;
+mod server;
+mod ssh_setup;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -22,7 +22,10 @@ fn main() {
     // clipaste ssh-setup [-p PORT] user@host [-p PORT]
     if args.len() >= 3 && args[1] == "ssh-setup" {
         match parse_ssh_setup_args(&args[2..]) {
-            Ok((host, ssh_port)) => ssh_setup::run_ssh(&host, ssh_port),
+            Ok((host, ssh_port)) => {
+                require_clipboard_host();
+                ssh_setup::run_ssh(&host, ssh_port);
+            }
             Err(e) => {
                 eprintln!("clipaste ssh-setup: {e}");
                 eprintln!("usage: clipaste ssh-setup [-p PORT] user@host");
@@ -56,6 +59,9 @@ fn main() {
         std::process::exit(doctor::run(json));
     }
 
+    // Reject unsupported hosts before starting a listener or touching the cache.
+    require_clipboard_host();
+
     // Start HTTP server for remote access
     let latest = common::LatestImage::default();
     server::start(latest.clone());
@@ -66,10 +72,12 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     windows::run(latest);
+}
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        eprintln!("clipaste: unsupported platform");
+fn require_clipboard_host() {
+    let os = std::env::consts::OS;
+    if !common::supports_clipboard_host(os) {
+        eprintln!("clipaste: {}", common::unsupported_host_message(os));
         std::process::exit(1);
     }
 }
@@ -100,14 +108,20 @@ fn parse_ssh_setup_args(args: &[String]) -> Result<(String, Option<u16>), String
             continue;
         }
         if let Some(rest) = a.strip_prefix("--port=") {
-            ssh_port = Some(rest.parse::<u16>().map_err(|_| format!("invalid port: {rest}"))?);
+            ssh_port = Some(
+                rest.parse::<u16>()
+                    .map_err(|_| format!("invalid port: {rest}"))?,
+            );
             i += 1;
             continue;
         }
         if let Some(rest) = a.strip_prefix("-p") {
             // -p22222 (attached form)
             if !rest.is_empty() {
-                ssh_port = Some(rest.parse::<u16>().map_err(|_| format!("invalid port: {rest}"))?);
+                ssh_port = Some(
+                    rest.parse::<u16>()
+                        .map_err(|_| format!("invalid port: {rest}"))?,
+                );
                 i += 1;
                 continue;
             }

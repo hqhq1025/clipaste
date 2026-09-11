@@ -18,15 +18,30 @@ the picture rather than a meaningless path.
 
 ## Install
 
+The clipboard-host daemon supports macOS and Windows only. Native Linux clipboard
+hosting is not implemented on either Wayland or X11.
+
+| OS / context | Local clipboard-host daemon | Consumer of another host's clipboard |
+|---|---|---|
+| macOS | Supported | SSH remote via `clipaste-paste` |
+| Windows | Supported | Via WSL2 |
+| Native Linux | Not implemented | Supported over SSH via shims / `clipaste-paste` |
+| WSL2 | No; the Windows daemon is required | Supported via `wsl-setup` |
+
 - macOS: `brew install hqhq1025/clipaste/clipaste && brew services start clipaste`
 - Windows: `irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex`
 - Verify: `clipaste doctor` (add `--json` for machine-readable output)
-- SSH remote: `clipaste ssh-setup user@host` — run this on the machine holding the clipboard
+- SSH remote: `clipaste ssh-setup user@host`, run on the local Mac or Windows clipboard host with its daemon running
 - WSL2: `clipaste wsl-setup` — run this inside the distro, with clipaste.exe running on Windows
+
+Linux `cargo build` and `cargo install` remain allowed for development, `doctor`,
+and consumer setup. They do not enable a local Linux daemon. A blanket
+`compile_error!` gate would also block these needed CLI tools. Linux shims consume
+images from the supported host; they do not watch the Linux clipboard.
 
 ## Paste gesture by tool and location
 
-| Tool | Local | SSH → Linux | SSH → macOS | WSL2 |
+| Tool | Local (macOS / Windows) | SSH → Linux | SSH → macOS | WSL2 |
 |---|---|---|---|---|
 | Claude Code | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
 | Cursor CLI | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
@@ -41,11 +56,24 @@ Never press Cmd+V inside an SSH session — it sends the local file path as text
 
 ## For coding agents
 
-`clipaste doctor --json` is the machine-readable entry point. It classifies the machine
-as `clipboard-host`, `ssh-remote` or `wsl2`, runs only the checks meaningful for that
-role, and returns each check as `{name, status, detail, fix}` where `fix` is a literal
-command. Exit code: 0 usable (including warnings), 1 broken, 2 bad arguments. All setup
+`clipaste doctor --json` is the machine-readable entry point. Its role contract is
+`clipboard-host`, `ssh-remote`, `wsl2`, or `unsupported-host`. Each check is
+`{name, status, detail, fix}`; `fix` is a remediation command, guidance, or `null`.
+Exit code: 0 usable (including warnings), 1 broken, 2 bad arguments. All setup
 commands are non-interactive and idempotent.
+
+The `unsupported-host` extension reports `fail` (exit 1) for an unsupported local
+machine without WSL context, an SSH session, or a configured consumer helper.
+Its `platform` check gives guidance in `detail` with `fix: null`.
+WSL takes precedence over SSH. Actual SSH sessions, including SSH into macOS,
+remain `ssh-remote`; a configured Linux consumer also retains `ssh-remote` when
+SSH environment variables are absent.
+
+`unsupported-host` is a capability failure, not a missing systemd service, PATH
+entry, or `curl` dependency. To use Linux as a consumer, run `ssh-setup` on the
+Mac or Windows clipboard host with its daemon running, then open a new SSH
+session. WSL2 requires the Windows daemon and `wsl-setup` inside the distro.
+No command enables a native Linux clipboard backend.
 
 ## Key facts
 
