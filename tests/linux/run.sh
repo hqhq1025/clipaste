@@ -18,23 +18,26 @@ fi
 export XDG_RUNTIME_DIR="$root/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 
-# Clipboard probes may disconnect before the owner opens its display connection.
-Xvfb -noreset -displayfd 3 -screen 0 1024x768x24 3>"$root/display" >"$root/xvfb.log" 2>&1 &
+mkfifo "$root/display"
+exec 3<>"$root/display"
+Xvfb -displayfd 3 -screen 0 1024x768x24 >"$root/xvfb.log" 2>&1 &
 xvfb_pid=$!
-for i in {1..100}; do
-    [[ -s "$root/display" ]] && break
-    sleep 0.05
-done
-export DISPLAY=":$(cat "$root/display")"
+if ! read -r -t 30 display_number <&3 || [[ ! "$display_number" =~ ^[0-9]+$ ]]; then
+    cat "$root/xvfb.log" >&2
+    echo "Xvfb did not report a valid display within 30 seconds" >&2
+    exit 1
+fi
+exec 3>&-
+export DISPLAY=":$display_number"
 /usr/bin/python3 tests/linux/smoke.py x11
 
-unset DISPLAY
+unset DISPLAY WAYLAND_DISPLAY
 export WLR_BACKENDS=headless
 export WLR_LIBINPUT_NO_DEVICES=1
 export WLR_RENDERER=pixman
 dbus-run-session sway --unsupported-gpu -c /dev/null >"$root/sway.log" 2>&1 &
 sway_pid=$!
-for i in {1..100}; do
+for i in {1..600}; do
     for socket in "$XDG_RUNTIME_DIR"/wayland-*; do
         if [[ -S "$socket" ]]; then export WAYLAND_DISPLAY="${socket##*/}"; break 2; fi
     done
