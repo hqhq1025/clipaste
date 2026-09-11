@@ -65,23 +65,35 @@ brew services start clipaste
 irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
 ```
 
-### Linux desktop (from source)
+### Linux desktop
 
-Install Rust/Cargo first. On Ubuntu, install the distro clipboard tools and
-`curl`, then build and install from the source checkout. These Linux instructions
-describe source builds, not a tagged Linux binary release:
+Starting with v2.5.0, [releases](https://github.com/hqhq1025/clipaste/releases)
+include statically linked Linux binaries for x86_64 and ARM64. Install the distro
+clipboard tools and `curl` first (Ubuntu example):
 
 ```bash
 sudo apt install wl-clipboard xclip curl
-git clone https://github.com/hqhq1025/clipaste.git
-cd clipaste
-cargo install --path .
+```
+
+Download and extract the archive matching your architecture:
+
+| `uname -m` | v2.5.0 archive |
+|---|---|
+| `x86_64` | `clipaste-v2.5.0-x86_64-unknown-linux-musl.tar.gz` |
+| `aarch64` / `arm64` | `clipaste-v2.5.0-aarch64-unknown-linux-musl.tar.gz` |
+
+The release includes `SHA256SUMS` for verifying the archives. From the directory
+containing the extracted `clipaste` binary:
+
+```bash
+install -Dm755 clipaste "$HOME/.local/bin/clipaste"
+export PATH="$HOME/.local/bin:$PATH"
 clipaste
 ```
 
 Run `clipaste` as your desktop user in a terminal opened from the graphical
-session, and leave it running. Ensure Cargo's binary directory (`~/.cargo/bin`
-by default) is on `PATH`. No Linux service or automatic startup is installed.
+session, and leave it running. Keep `~/.local/bin` on your shell's `PATH`.
+No Linux service or automatic startup is installed.
 In a separate terminal in the same desktop session, verify and configure SSH:
 
 ```bash
@@ -124,6 +136,15 @@ file manager that offers only a URI is not supported yet; copy the image pixels
 or a screenshot instead. Existing macOS and Windows paste workflows remain unchanged.
 
 ### Build from source
+
+With Rust/Cargo installed, build the tagged release on any supported host:
+
+```bash
+cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked
+```
+
+Put Cargo's binary directory (normally `~/.cargo/bin`) on `PATH`. Linux still
+requires the distro clipboard tools and graphical-session access described above.
 
 For development on any supported platform, use `cargo build --release` from the
 checkout. Linux builds also retain `doctor` and consumer setup commands,
@@ -376,7 +397,7 @@ automatically. Run `clipaste doctor --json` in a separate desktop terminal.
 
 Install clipaste with `brew install hqhq1025/clipaste/clipaste && brew services start clipaste` on macOS, or the PowerShell one-liner on Windows. Once running, take a screenshot and press **Ctrl+V** in Claude Code — the image pastes automatically. No configuration needed. clipaste runs as a background daemon and handles the clipboard conversion for you.
 
-For a Linux clipboard host, follow [Linux desktop setup](#linux-desktop-from-source)
+For a Linux clipboard host, follow [Linux desktop setup](#linux-desktop)
 and the SSH workflow. The read-only backend does not add local text-path paste.
 
 ### Why can't I paste images in my terminal on macOS?

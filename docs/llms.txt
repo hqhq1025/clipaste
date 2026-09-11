@@ -37,17 +37,27 @@ access. Linux hosting reads `image/png` only; it does not add local text-path pa
 - SSH remote: `clipaste ssh-setup user@host`, run on the local macOS, Windows, or graphical Linux clipboard host with its daemon running
 - WSL2: `clipaste wsl-setup` — run this inside the distro, with clipaste.exe running on Windows
 
-Linux desktop installation requires Rust/Cargo and distro tools. On Ubuntu:
+Linux v2.5.0 release archives include static x86_64 and ARM64 binaries.
+Install distro tools first (Ubuntu example):
 
 ```bash
 sudo apt install wl-clipboard xclip curl
-git clone https://github.com/hqhq1025/clipaste.git
-cd clipaste
-cargo install --path .
+```
+
+Download the matching `x86_64-unknown-linux-musl` or
+`aarch64-unknown-linux-musl` archive from the v2.5.0 release, verify it against
+`SHA256SUMS`, and extract it. Then:
+
+```bash
+install -Dm755 clipaste "$HOME/.local/bin/clipaste"
+export PATH="$HOME/.local/bin:$PATH"
 clipaste
 ```
 
-Put Cargo's binary directory (normally `~/.cargo/bin`) on `PATH`. Run `clipaste`
+For source installation with Rust/Cargo:
+`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked`.
+Source installs use `~/.cargo/bin`; extracted binaries above use `~/.local/bin`.
+Keep the relevant directory on `PATH`. Run `clipaste`
 as your desktop user from a graphical terminal and leave it running. No Linux
 service or auto-start is installed. In a separate terminal in the same session:
 

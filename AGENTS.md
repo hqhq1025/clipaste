@@ -124,17 +124,26 @@ irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
 clipaste doctor --json
 ```
 
-Linux desktop (Rust/Cargo required; Ubuntu package example):
+Linux desktop (Ubuntu package example):
 
 ```bash
 sudo apt install wl-clipboard xclip curl
-git clone https://github.com/hqhq1025/clipaste.git
-cd clipaste
-cargo install --path .
+```
+
+v2.5.0 releases include static Linux archives for `x86_64-unknown-linux-musl`
+and `aarch64-unknown-linux-musl`. Download the matching architecture, verify
+against the release's `SHA256SUMS`, extract it, then:
+
+```bash
+install -Dm755 clipaste "$HOME/.local/bin/clipaste"
+export PATH="$HOME/.local/bin:$PATH"
 clipaste
 ```
 
-Ensure Cargo's binary directory (normally `~/.cargo/bin`) is on `PATH`. Start
+Source installation with Rust/Cargo is also supported:
+`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked`.
+Ensure the appropriate binary directory (`~/.local/bin` for the extracted
+archive or normally `~/.cargo/bin` for Cargo) is on `PATH`. Start
 `clipaste` as the desktop user in a graphical-session terminal and leave it
 running. No Linux service or auto-start entry is installed. In a separate
 terminal from that same session, run:
@@ -342,9 +351,13 @@ ext-only compositors, or the reporter's native application.
    must match; `doctor` compares the running daemon's reported version against
    the binary's and warns on skew.
 2. `cargo test && cargo clippy --all-targets`
-3. Tag `vX.Y.Z` and push — `.github/workflows/release.yml` builds macOS
-   (aarch64 + x86_64) and Windows artifacts and cuts the GitHub release.
-4. Update the Homebrew formula in `hqhq1025/homebrew-clipaste`.
+3. Run the Release workflow manually on the release commit to validate packaging
+   without publishing. It builds macOS (aarch64 + x86_64), Windows x86_64, and
+   static Linux musl (aarch64 + x86_64) artifacts. Linux release binaries run
+   through the isolated Xvfb/Sway smoke tests on native architecture runners.
+4. After validation, tag `vX.Y.Z` and push. The same workflow builds and publishes
+   the artifacts with `SHA256SUMS`. Never rewrite an existing release tag.
+5. Update the Homebrew formula in `hqhq1025/homebrew-clipaste`.
 
 ### When fixing a reported issue
 

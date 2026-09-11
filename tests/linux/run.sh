@@ -11,12 +11,15 @@ trap cleanup EXIT
 
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
-cargo build --locked
-export CLIPASTE_TEST_BINARY="$PWD/target/debug/clipaste"
+if [[ -z "${CLIPASTE_TEST_BINARY:-}" ]]; then
+    cargo build --locked
+    export CLIPASTE_TEST_BINARY="$PWD/target/debug/clipaste"
+fi
 export XDG_RUNTIME_DIR="$root/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 
-Xvfb -displayfd 3 -screen 0 1024x768x24 3>"$root/display" >"$root/xvfb.log" 2>&1 &
+# Clipboard probes may disconnect before the owner opens its display connection.
+Xvfb -noreset -displayfd 3 -screen 0 1024x768x24 3>"$root/display" >"$root/xvfb.log" 2>&1 &
 xvfb_pid=$!
 for i in {1..100}; do
     [[ -s "$root/display" ]] && break

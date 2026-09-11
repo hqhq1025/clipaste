@@ -3,7 +3,7 @@
 Homepage: https://hqhq1025.github.io/clipaste/
 Source: https://github.com/hqhq1025/clipaste
 License: MIT
-Version: 2.4.2
+Version: 2.5.0
 Language: Rust
 Author: Haoqing Wang (https://github.com/hqhq1025)
 
@@ -117,20 +117,24 @@ irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
 The Windows installer downloads the latest release into `%LOCALAPPDATA%\clipaste`, adds it
 to the user PATH, registers an `HKCU\...\Run` auto-start entry, and launches the daemon.
 
-Linux desktop from source (Rust/Cargo required; Ubuntu package example):
-
-These Linux instructions describe the source checkout, not a tagged Linux
-binary release.
+Linux desktop (v2.5.0 includes static x86_64 and ARM64 release binaries):
 
 ```bash
 sudo apt install wl-clipboard xclip curl
-git clone https://github.com/hqhq1025/clipaste.git
-cd clipaste
-cargo install --path .
+```
+
+Download `clipaste-v2.5.0-x86_64-unknown-linux-musl.tar.gz` for x86_64 or
+`clipaste-v2.5.0-aarch64-unknown-linux-musl.tar.gz` for ARM64 from
+https://github.com/hqhq1025/clipaste/releases/tag/v2.5.0. Verify the archive
+against the release's `SHA256SUMS`, extract it, then install the binary:
+
+```bash
+install -Dm755 clipaste "$HOME/.local/bin/clipaste"
+export PATH="$HOME/.local/bin:$PATH"
 clipaste
 ```
 
-Ensure Cargo's binary directory (`~/.cargo/bin` by default) is on `PATH`. Run
+Keep `~/.local/bin` on your shell's `PATH`. Run
 `clipaste` as the desktop user in a graphical-session terminal and leave it
 running. No Linux service or automatic startup is installed. Stop with Ctrl+C;
 restart from the same graphical session. In a separate desktop terminal:
@@ -144,6 +148,10 @@ Copy a screenshot as image data and re-run `doctor`; an empty clipboard warning
 before copying is normal. Open a new SSH session and verify the fetched image
 with `clipaste-paste` or a supported shim-based paste gesture.
 
+To install from source with Rust/Cargo, use
+`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked`
+and put Cargo's binary directory (normally `~/.cargo/bin`) on `PATH`.
+Linux still requires the distro tools and graphical-session access above.
 For development, run `cargo build --release` in the checkout. Linux builds
 retain diagnostics and consumer setup commands, including `wsl-setup`; WSL2
 remains a Windows consumer.

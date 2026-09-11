@@ -19,6 +19,7 @@ mode = sys.argv[1]
 binary = os.environ["CLIPASTE_TEST_BINARY"]
 base = "http://127.0.0.1:18340"
 owners = []
+owner_logs = []
 
 
 def get(path):
@@ -45,8 +46,10 @@ def copy(data, mime="image/png", sensitive=False):
         args = ["wl-copy", "--foreground", "--type", mime]
         if sensitive:
             args.append("--sensitive")
+    owner_log = tempfile.TemporaryFile()
+    owner_logs.append(owner_log)
     proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+                            stderr=owner_log, start_new_session=True)
     owners.append(proc)
     proc.stdin.write(data)
     proc.stdin.close()
@@ -167,10 +170,16 @@ with tempfile.TemporaryDirectory(prefix="clipaste-smoke-") as temp:
         log.flush()
         log.seek(0)
         print(log.read(), file=sys.stderr)
+        for owner, owner_log in zip(owners, owner_logs):
+            owner_log.seek(0)
+            print(f"clipboard owner {owner.args}, status={owner.poll()}: "
+                  f"{owner_log.read().decode(errors='replace')}", file=sys.stderr)
         raise
     finally:
         if daemon is not None:
             stop(daemon)
         for owner in owners:
             stop(owner)
+        for owner_log in owner_logs:
+            owner_log.close()
         log.close()
