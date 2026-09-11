@@ -11,6 +11,22 @@ use std::time::SystemTime;
 pub const VERSION: &str = "2.4.2";
 pub const DEFAULT_PORT: u16 = 18340;
 
+pub fn supports_clipboard_host(os: &str) -> bool {
+    matches!(os, "macos" | "windows")
+}
+
+pub fn unsupported_host_message(os: &str) -> String {
+    let name = if os == "linux" { "Linux" } else { os };
+    format!(
+        "{name} clipboard host is not supported. The daemon requires macOS or Windows.\n\
+         Linux is supported as an SSH consumer: run `clipaste ssh-setup user@host` on \
+         the macOS/Windows clipboard host, then use `clipaste-paste` on the remote.\n\
+         In WSL2, run `clipaste wsl-setup` with clipaste.exe running on Windows.\n\
+         Installing the Rust binary does not add a Linux clipboard backend.\n\
+         See https://github.com/hqhq1025/clipaste#supported-platforms"
+    )
+}
+
 /// Shared state: path to the most recently saved screenshot PNG
 pub type LatestImage = Arc<Mutex<Option<PathBuf>>>;
 
@@ -406,7 +422,7 @@ pub fn print_help() {
         "clipaste v{VERSION} — Fix screenshot paste in terminals (local + SSH + WSL2)
 
 USAGE
-  clipaste                       Run daemon (clipboard watcher + HTTP server)
+  clipaste                       Run daemon (macOS/Windows clipboard host only)
   clipaste doctor [--json]       Diagnose this machine and print the fix command
   clipaste ssh-setup user@host   Configure remote server for image paste via SSH
                                  (add -p PORT for a custom SSH port)
@@ -440,10 +456,14 @@ WHAT IT DOES
           networking modes both work); override it with --host IP if needed.
 
 COMPATIBILITY
+  Host:    macOS and Windows only; native Linux clipboard hosts are unsupported
   macOS:   Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty
   Windows: Windows Terminal, PowerShell, cmd.exe
-  Remote:  Any Linux server via SSH
-  WSL2:    Ubuntu, Debian, Fedora, Arch on WSL2
+  Remote:  Linux and macOS via SSH from a macOS/Windows clipboard host
+  WSL2:    Consumer only; requires clipaste.exe running on Windows
+
+  Building/installing this binary on Linux provides doctor and setup commands,
+  not a local clipboard watcher. Run ssh-setup on the macOS/Windows host.
 
 MORE INFO
   https://github.com/hqhq1025/clipaste"

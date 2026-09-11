@@ -18,7 +18,7 @@ clipaste doctor --json
 ```
 
 This is the entry point. It classifies the machine, runs the checks that are
-meaningful for that machine, and returns a `fix` command for anything broken.
+meaningful for that machine, and returns `fix` commands or guidance where available.
 Do not guess at the state of a clipaste install — ask `doctor`.
 
 ```json
@@ -46,20 +46,32 @@ Do not guess at the state of a clipaste install — ask `doctor`.
 
 | Field | Contract |
 |---|---|
-| `role` | `clipboard-host` / `ssh-remote` / `wsl2` — decides which checks apply |
+| `role` | `clipboard-host` / `ssh-remote` / `wsl2` / `unsupported-host` decides which checks apply |
 | `status` | worst of all checks: `ok`, `warn`, `fail` |
 | `checks[].status` | `ok` / `warn` / `fail` |
-| `checks[].fix` | a literal command to run, or `null` |
+| `checks[].fix` | a remediation command or guidance, or `null` when no single command applies |
 | exit code | `0` usable (ok **or** warn), `1` broken, `2` bad arguments |
 
 A `warn` is not a failure. "No screenshot on the clipboard yet" is the normal
 state of a freshly installed machine — do not report it to the user as a
 problem, and do not try to fix it.
 
+`unsupported-host` is an extension of the role contract. Consumers of the JSON
+output must accept it and treat its `fail` status (exit code `1`) as a platform
+capability limit, not as a missing service or dependency. Its `platform` check
+provides guidance in `detail` with `fix: null`.
+
 ### Decide where you are before installing anything
 
 clipaste has two sides and they install differently. Getting this wrong is the
 single most common mistake.
+
+| OS / context | Local clipboard-host daemon | Consumer of another host's clipboard |
+|---|---|---|
+| macOS | Supported | SSH remote via `clipaste-paste` |
+| Windows | Supported | Via WSL2 |
+| Native Linux | Not implemented, on Wayland or X11 | Supported over SSH via shims / `clipaste-paste` |
+| WSL2 | No; the Windows daemon is required | Supported via `wsl-setup` |
 
 ```
         the machine holding the clipboard          the machine running the agent
@@ -74,6 +86,17 @@ single most common mistake.
 
 `clipaste doctor --json` reports which side you are on as `role`. Trust it over
 `uname`: an SSH session into a Mac is `ssh-remote`, not `clipboard-host`.
+
+The role contract applies in this order:
+
+1. WSL context: `wsl2`, even if SSH environment variables are also present.
+2. An actual SSH session: `ssh-remote`, including SSH into macOS.
+3. A local macOS or Windows machine: `clipboard-host`.
+4. A machine without a local backend but with a configured consumer helper:
+   `ssh-remote`. This includes Linux consumers without SSH environment variables;
+   keep checking their helper and bridge.
+5. An unsupported local machine without those consumer indicators:
+   `unsupported-host`.
 
 ### Install on the clipboard host
 
@@ -92,17 +115,23 @@ irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
 clipaste doctor --json
 ```
 
-From source (any platform with a Rust toolchain):
+From source:
 
 ```bash
 git clone https://github.com/hqhq1025/clipaste.git
 cd clipaste && cargo build --release
 ```
 
+Linux `cargo build` and `cargo install` remain allowed for development, `doctor`,
+and consumer setup, including `wsl-setup`. Successful compilation does not
+provide a Linux clipboard-host daemon. Do not add a blanket `compile_error!`
+gate: the CLI tools are still needed on Linux consumers.
+
 ### Wire up an SSH remote
 
-Run this **on the clipboard host**, not on the remote. It needs the local daemon
-running, and it edits the local `~/.ssh/config`.
+Run this on the local macOS or Windows clipboard host, not on the Linux
+consumer or other remote. It needs the local daemon running, and it edits the
+local `~/.ssh/config`.
 
 ```bash
 clipaste ssh-setup user@host             # non-interactive; idempotent
@@ -139,7 +168,7 @@ their time:
 
 | Where | Claude Code / Cursor CLI | Codex CLI |
 |---|---|---|
-| Local terminal | `Cmd+V` (macOS) / `Ctrl+V` | `Cmd+V` / `Ctrl+V` |
+| Local terminal (macOS / Windows) | `Cmd+V` (macOS) / `Ctrl+V` | `Cmd+V` (macOS) / `Ctrl+V` |
 | SSH into Linux | `Ctrl+V` | `clipaste-paste`, then paste the printed path |
 | SSH into macOS | `clipaste-paste` | `clipaste-paste` |
 | WSL2 | `Ctrl+V` | `clipaste-paste`, then paste the printed path |
@@ -153,6 +182,13 @@ file path as text, which the remote agent cannot open.
 
 ### Things not to do
 
+- Do not try to fix `unsupported-host` by adding a systemd service, changing
+  PATH, or installing `curl`. Native Linux clipboard hosting is not implemented;
+  the shims only fetch images from a macOS or Windows daemon. For a Linux
+  consumer, run `ssh-setup` on that supported clipboard host and reconnect.
+  For WSL2, require the Windows daemon and run `wsl-setup` inside the distro.
+- Do not classify all Linux machines as `unsupported-host`: actual SSH sessions
+  and configured Linux consumers retain `ssh-remote` diagnostics.
 - Do not bind the daemon to `0.0.0.0` or add firewall exceptions to "fix"
   connectivity. It listens on loopback deliberately; the image bytes on that
   port are the user's screen contents.

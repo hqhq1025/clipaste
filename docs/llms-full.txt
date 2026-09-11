@@ -59,7 +59,7 @@ wsl-setup` installs the same shims inside the distro, pointed at clipaste.exe on
 ## Commands
 
 ```
-clipaste                       Run the daemon (clipboard watcher + HTTP server)
+clipaste                       Run the daemon (macOS / Windows only)
 clipaste doctor [--json]       Diagnose this machine and print the fix command
 clipaste ssh-setup user@host   Configure an SSH remote (add -p PORT for a custom SSH port)
 clipaste wsl-setup             Configure WSL2 (add --host IP to skip host auto-detection)
@@ -73,6 +73,21 @@ fetches the current clipboard image into a real file on that host and prints the
 ---
 
 ## Installing
+
+### Supported hosts and consumers
+
+The clipboard-host daemon runs on macOS and Windows only. Native Linux clipboard
+hosting is not implemented, for either Wayland or X11.
+
+| OS / context | Local clipboard-host daemon | Consumer of another host's clipboard |
+|---|---|---|
+| macOS | Supported | SSH remote via `clipaste-paste` |
+| Windows | Supported | Via WSL2 |
+| Native Linux | Not implemented | Supported over SSH via shims / `clipaste-paste` |
+| WSL2 | No; the Windows daemon is required | Supported via `wsl-setup` |
+
+Linux shims fetch images from a macOS or Windows daemon; they do not own or
+watch the Linux desktop clipboard. On macOS remotes, use `clipaste-paste`.
 
 macOS (Homebrew):
 
@@ -97,11 +112,17 @@ git clone https://github.com/hqhq1025/clipaste.git
 cd clipaste && cargo build --release
 ```
 
+`cargo build` and `cargo install` on Linux remain allowed for development,
+`doctor`, and consumer setup, including WSL2 setup. Build success does not imply
+local clipboard-host support. No blanket `compile_error!` gate is used because
+the CLI tools are needed on Linux consumers.
+
 ---
 
 ## SSH remote setup, in detail
 
-Run on the machine that holds the clipboard, not on the remote:
+Run on the local Mac or Windows clipboard host with its daemon running, not on
+the Linux consumer or other remote:
 
 ```bash
 clipaste ssh-setup user@your-server
@@ -160,7 +181,7 @@ unavailable, forward the port on the Windows side with `netsh interface portprox
 
 ## Paste gestures
 
-| Tool | Local | SSH → Linux | SSH → macOS | WSL2 |
+| Tool | Local (macOS / Windows) | SSH → Linux | SSH → macOS | WSL2 |
 |---|---|---|---|---|
 | Claude Code | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
 | Cursor CLI | Ctrl+V | Ctrl+V | `clipaste-paste` | Ctrl+V |
@@ -202,14 +223,34 @@ clipaste doctor --json
 
 Contract:
 
-- `role` is `clipboard-host`, `ssh-remote` or `wsl2`, and decides which checks run.
-  Detection order is WSL markers, then SSH variables, then platform — because a WSL distro
-  is also Linux, and an SSH session into a Mac is a remote rather than a clipboard host.
+- `role` is `clipboard-host`, `ssh-remote`, `wsl2`, or `unsupported-host`, and
+  decides which checks run. `unsupported-host` is an extension of the role
+  contract; callers must accept the additional value.
+- Detection order is WSL context, then SSH session, then a supported local
+  macOS / Windows host, then a configured consumer helper, otherwise
+  `unsupported-host`. WSL takes precedence even with SSH variables present.
+  Actual SSH sessions remain `ssh-remote`, including SSH into macOS. A configured
+  Linux consumer also stays `ssh-remote` without SSH environment variables, so
+  helper and bridge checks still run.
 - `status` is the worst of all checks: `ok`, `warn` or `fail`.
-- `checks[].fix` is a literal command, or `null`.
+- `checks[].fix` is a remediation command or guidance, or `null` when no single
+  command applies.
 - Exit code is `0` when usable (including warnings), `1` when broken, `2` on bad arguments.
 - A `warn` is not a failure. "No screenshot staged yet" is the normal state of a fresh
   install; treating it as a fault causes an agent to loop.
+
+`unsupported-host` reports `fail` with exit code `1` for a local machine whose
+clipboard-host backend is unsupported and which has no WSL context, SSH session,
+or configured consumer helper. This is a capability failure, not a missing
+systemd service, PATH entry, or `curl` dependency. Installing dependencies or
+adding a service cannot enable native Linux clipboard hosting.
+The `platform` check puts the explanation and supported setup paths in `detail`,
+with `fix: null` because no single command can add the missing backend.
+
+To consume a supported host's clipboard on Linux, start the daemon on that
+local Mac or Windows host, run `ssh-setup` there, and open a new SSH session.
+For WSL2, keep the Windows daemon running and run `wsl-setup` in the distro.
+No command enables a native Linux backend.
 
 Checks distinguish failure modes that look identical from outside: helper missing, helper
 installed but not on PATH, shim shadowed by the real `xclip`, tunnel down, and a stale
@@ -228,9 +269,10 @@ Terminals on the clipboard host: Ghostty, Alacritty, iTerm2, Terminal.app, WezTe
 Kitty on macOS; Windows Terminal, PowerShell and cmd.exe on Windows. WezTerm and Kitty
 also cover Windows Ctrl+V.
 
-Remotes: any Linux server reachable over SSH that has `curl`. WSL2 distros including
-Ubuntu, Debian, Fedora, Arch and Kali. macOS remotes are supported through
-`clipaste-paste`.
+Consumers: Linux servers reachable over SSH with `curl`, backed by a macOS or
+Windows clipboard host. WSL2 distros including Ubuntu, Debian, Fedora, Arch and
+Kali require the Windows daemon. macOS remotes are supported through
+`clipaste-paste`. Native Linux clipboard hosting is not implemented.
 
 ---
 
@@ -276,15 +318,17 @@ arrives empty. clipaste writes the screenshot to a temp PNG and puts that path o
 clipboard alongside the image data.
 
 **Can I paste screenshots into Claude Code running on a remote server over SSH?**
-Yes. Run `clipaste ssh-setup user@host` from the machine holding the clipboard, then open a
-new SSH session and press Ctrl+V.
+Yes. Run `clipaste ssh-setup user@host` from the local Mac or Windows clipboard
+host with its daemon running, then open a new SSH session. On Linux remotes,
+press Ctrl+V in Claude Code; on macOS remotes, use `clipaste-paste`.
 
 **Why can't Codex CLI paste images over SSH the way Claude Code can?**
 Codex reads the clipboard in-process via `arboard` and never runs `xclip`, so it bypasses
 the shim. Use `clipaste-paste` on the remote and hand the printed path to Codex.
 
 **Does clipaste work in WSL2?**
-Yes, in both mirrored and NAT networking modes. Run `clipaste wsl-setup` inside the distro.
+Yes, with the Windows daemon already running. Run `clipaste wsl-setup` inside
+the distro; see the networking requirements above.
 
 **How much memory and CPU does clipaste use?**
 About 9 MB resident and no measurable idle CPU.

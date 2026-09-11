@@ -76,6 +76,8 @@ pub enum Role {
     SshRemote,
     /// A WSL2 distro; fetches from clipaste.exe on the Windows host.
     Wsl2,
+    /// No local clipboard backend and no evidence of a configured consumer.
+    UnsupportedHost,
 }
 
 impl Role {
@@ -84,29 +86,41 @@ impl Role {
             Role::ClipboardHost => "clipboard-host",
             Role::SshRemote => "ssh-remote",
             Role::Wsl2 => "wsl2",
+            Role::UnsupportedHost => "unsupported-host",
         }
     }
 }
 
 /// Classify the current machine.
 ///
-/// Order matters. WSL2 is checked first because a WSL distro is also Linux and
+/// Order matters. WSL2 is checked first on Linux because a WSL distro
 /// may also carry SSH variables; SSH is checked before the platform default
 /// because an SSH'd-into Mac is a *remote*, not a clipboard host — that
 /// distinction is exactly what issue #2 turned on.
 pub fn detect_role() -> Role {
-    if is_wsl() {
+    classify_role(
+        std::env::consts::OS,
+        is_wsl(),
+        is_ssh_session(),
+        installed_helper_url(&home().join(".local/bin/clipaste-paste")).is_some(),
+    )
+}
+
+fn classify_role(os: &str, wsl: bool, ssh: bool, configured_consumer: bool) -> Role {
+    if os == "linux" && wsl {
         return Role::Wsl2;
     }
-    if is_ssh_session() {
+    if ssh {
         return Role::SshRemote;
     }
-    if cfg!(any(target_os = "macos", target_os = "windows")) {
+    if common::supports_clipboard_host(os) {
         Role::ClipboardHost
-    } else {
-        // Plain Linux with no SSH variables: it has no clipaste daemon of its
-        // own, so it can only ever be the consuming side.
+    } else if configured_consumer {
+        // A configured Linux consumer may be used outside the original SSH
+        // session (for example from tmux); let bridge checks diagnose its tunnel.
         Role::SshRemote
+    } else {
+        Role::UnsupportedHost
     }
 }
 
@@ -247,7 +261,19 @@ pub fn run(json: bool) -> i32 {
 }
 
 fn diagnose() -> Report {
-    let role = detect_role();
+    diagnose_role(detect_role())
+}
+
+fn diagnose_role(role: Role) -> Report {
+    if role == Role::UnsupportedHost {
+        return Report {
+            role,
+            checks: vec![Check::fail(
+                "platform",
+                common::unsupported_host_message(std::env::consts::OS),
+            )],
+        };
+    }
     let mut checks = Vec::new();
 
     if which("curl").is_none() {
@@ -261,6 +287,7 @@ fn diagnose() -> Report {
         Role::ClipboardHost => checks.extend(clipboard_host_checks()),
         Role::SshRemote => checks.extend(consumer_checks(Role::SshRemote)),
         Role::Wsl2 => checks.extend(consumer_checks(Role::Wsl2)),
+        Role::UnsupportedHost => unreachable!("unsupported host returned above"),
     }
 
     Report { role, checks }
@@ -489,6 +516,9 @@ fn render_human(r: &Report) -> String {
     out.push_str(match r.worst() {
         Status::Ok => "All good.\n",
         Status::Warn => "Usable, with warnings above.\n",
+        Status::Fail if r.role == Role::UnsupportedHost => {
+            "Local clipboard hosting is unavailable on this platform; see the supported roles above.\n"
+        }
         Status::Fail => "Not working — run the → commands above.\n",
     });
     out
@@ -527,6 +557,40 @@ fn render_json(r: &Report) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_linux_is_not_assumed_to_be_an_ssh_remote() {
+        assert_eq!(
+            classify_role("linux", false, false, false),
+            Role::UnsupportedHost
+        );
+    }
+
+    #[test]
+    fn role_detection_preserves_existing_consumers_and_supported_hosts() {
+        assert_eq!(classify_role("linux", false, true, false), Role::SshRemote);
+        assert_eq!(classify_role("linux", false, false, true), Role::SshRemote);
+        assert_eq!(classify_role("linux", true, true, true), Role::Wsl2);
+        assert_eq!(classify_role("macos", false, true, true), Role::SshRemote);
+        assert_eq!(classify_role("macos", false, false, true), Role::ClipboardHost);
+        assert_eq!(classify_role("windows", true, false, true), Role::ClipboardHost);
+    }
+
+    #[test]
+    fn unsupported_host_reports_capability_without_install_or_network_checks() {
+        let report = diagnose_role(Role::UnsupportedHost);
+        assert_eq!(report.exit_code(), 1);
+        assert_eq!(report.checks.len(), 1);
+        assert_eq!(report.checks[0].name, "platform");
+        assert!(report.checks[0].fix.is_none());
+        let json = render_json(&report);
+        assert!(json.contains("\"role\":\"unsupported-host\""));
+        assert!(json.contains("\"status\":\"fail\""));
+        assert!(json.contains("macOS or Windows"));
+        let human = render_human(&report);
+        assert!(human.contains("clipaste ssh-setup"));
+        assert!(!human.contains("run the → commands"));
+    }
 
     #[test]
     fn parses_helper_url() {
