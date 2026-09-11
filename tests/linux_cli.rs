@@ -5,6 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 struct TestHome(PathBuf);
 
@@ -78,16 +79,18 @@ fn wsl_kernel() -> bool {
 }
 
 #[test]
-fn unsupported_daemon_and_host_setup_fail_before_side_effects() {
+fn headless_daemon_fails_before_side_effects() {
     let home = TestHome::new();
-    for args in [vec![], vec!["ssh-setup", "user@example.invalid"]] {
-        let out = home.command().args(args).output().unwrap();
+    {
+        let out = home.command().output().unwrap();
         assert_eq!(out.status.code(), Some(1));
         assert!(out.stdout.is_empty());
         let error = String::from_utf8(out.stderr).unwrap();
-        assert!(error.contains("Linux clipboard host is not supported"));
-        assert!(error.contains("macOS or Windows"));
-        assert!(error.contains("clipaste-paste"));
+        assert!(error.contains(if wsl_kernel() {
+            "WSL2 is a clipboard consumer"
+        } else {
+            "No Linux graphical session"
+        }));
         assert!(!error.contains("http server"));
         assert!(!error.contains("brew services start"));
         assert_eq!(fs::read_dir(&home.0).unwrap().count(), 0);
@@ -107,10 +110,9 @@ fn native_linux_or_wsl_doctor_reports_the_applicable_failure() {
         assert!(json.contains("\"name\":\"helper\""));
         assert!(!json.contains("\"name\":\"platform\""));
     } else {
-        assert!(json.contains("\"role\":\"unsupported-host\""));
-        assert!(json.contains("\"name\":\"platform\""));
+        assert!(json.contains("\"role\":\"clipboard-host\""));
+        assert!(json.contains("\"name\":\"backend\""));
         assert!(json.contains("\"fix\":null"));
-        assert!(!json.contains("\"name\":\"curl\""));
         assert!(!json.contains("\"name\":\"helper\""));
     }
     assert_eq!(fs::read_dir(&home.0).unwrap().count(), 0);
@@ -220,7 +222,7 @@ fn help_version_and_consumer_argument_validation_remain_available() {
         let out = home.command().arg(flag).output().unwrap();
         assert!(out.status.success());
         if flag == "--help" {
-            assert!(stdout(&out).contains("native Linux clipboard hosts are unsupported"));
+            assert!(stdout(&out).contains("Linux desktop"));
             assert!(stdout(&out).contains("wsl-setup"));
         }
     }
@@ -233,4 +235,174 @@ fn help_version_and_consumer_argument_validation_remain_available() {
     let error = String::from_utf8(out.stderr).unwrap();
     assert!(error.contains("unexpected argument"));
     assert!(!error.contains("clipboard host is not supported"));
+}
+
+#[test]
+fn desktop_backend_checks_dependencies_and_never_executes_consumer_shims() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.script("xclip", "#!/bin/sh\nCLIPASTE_URL=\"http://127.0.0.1:18340\"\nprintf called > \"$HOME/shim-called\"\n");
+    let out = home
+        .command()
+        .env("DISPLAY", ":999")
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout(&out).contains("consumer shims do not count"));
+    assert!(!home.0.join("shim-called").exists());
+    assert!(!home.0.join("cache").exists());
+}
+
+#[test]
+fn wayland_failure_and_xwayland_fallback_are_visible() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.fake_curl();
+    home.script(
+        "wl-paste",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'wl-paste 2.3.0\\n'; exit 0; fi\n\
+         case \" $* \" in *' --watch '*) printf 'Watch mode requires data-control\\n' >&2; exit 1;; esac\n\
+         printf called > \"$HOME/unsafe-paste-called\"\n",
+    );
+    home.script("xclip", "#!/bin/sh\nprintf 'TARGETS\\ntext/plain\\n'\n");
+    let mut command = home.command();
+    command
+        .env("WAYLAND_DISPLAY", "wayland-test")
+        .env("DISPLAY", ":999");
+    let out = command.args(["doctor", "--json"]).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("Using XWayland"));
+    assert!(!home.0.join("unsafe-paste-called").exists());
+    let out = home
+        .command()
+        .env("WAYLAND_DISPLAY", "wayland-test")
+        .env("DISPLAY", ":999")
+        .env("CLIPASTE_BACKEND", "wayland")
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stdout(&out).contains("Watch mode requires data-control"));
+    assert!(!home.0.join("unsafe-paste-called").exists());
+}
+
+#[test]
+fn native_wayland_backend_accepts_data_control_and_empty_clipboard() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.fake_curl();
+    home.script(
+        "wl-paste",
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'wl-paste 2.2.1\\n'; exit 0; fi\n\
+         printf 'Nothing is copied\\n' >&2\nexit 1\n",
+    );
+    let out = home
+        .command()
+        .env("WAYLAND_DISPLAY", "wayland-test")
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("Wayland data-control clipboard"));
+    assert!(!stdout(&out).contains("Using XWayland"));
+}
+
+#[test]
+fn wayland_requires_empty_selection_event_support() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.fake_curl();
+    for (version, code) in [("2.1.0", 1), ("2.2.1", 0), ("2.3.0", 0)] {
+        home.script("wl-paste", &format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then printf 'wl-paste {version}\\n'; exit 0; fi\n\
+             printf called > \"$HOME/paste-called\"\nprintf 'Nothing is copied\\n' >&2\nexit 1\n"
+        ));
+        let out = home
+            .command()
+            .env("WAYLAND_DISPLAY", "wayland-test")
+            .args(["doctor", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(code), "{out:?}");
+        if code == 1 {
+            assert!(stdout(&out).contains("2.2 or later"));
+            assert!(!home.0.join("paste-called").exists());
+        } else {
+            assert!(home.0.join("paste-called").exists());
+        }
+    }
+}
+
+#[test]
+fn linux_ssh_setup_reports_linux_start_command_without_connecting() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.fake_curl();
+    let out = home
+        .command()
+        .env("CLIPASTE_TEST_CURL_FAIL", "1")
+        .args(["ssh-setup", "user@example.invalid"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let error = String::from_utf8(out.stderr).unwrap();
+    assert!(error.contains("Linux graphical desktop session"));
+    assert!(!error.contains("brew"));
+    assert!(!home.0.join(".ssh").exists());
+}
+
+#[test]
+fn normal_stop_cleans_up_a_hung_clipboard_process_group() {
+    if wsl_kernel() {
+        return;
+    }
+    let home = TestHome::new();
+    home.script(
+        "xclip",
+        "#!/bin/sh\n/bin/sleep 30 &\nprintf '%s %s' \"$$\" \"$!\" > \"$HOME/children\"\nwait\n",
+    );
+    let mut daemon = home.command().env("DISPLAY", ":999").spawn().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let children = home.0.join("children");
+    while !children.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if !children.exists() {
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+        panic!("clipboard command did not start");
+    }
+    // The readiness file is written by the hung command, not by a timed guess.
+    let pids = fs::read_to_string(children).unwrap();
+    unsafe { libc::kill(daemon.id() as i32, libc::SIGTERM) };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while daemon.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if daemon.try_wait().unwrap().is_none() {
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+        panic!("daemon did not stop");
+    }
+    for pid in pids.split_whitespace() {
+        let status = fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
+        assert!(
+            status.is_empty()
+                || status
+                    .lines()
+                    .any(|line| line.starts_with("State:") && line.contains('Z')),
+            "clipboard subprocess {pid} still running: {status}"
+        );
+    }
 }

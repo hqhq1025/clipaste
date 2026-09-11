@@ -62,6 +62,7 @@ version = "2.4.2"
 dependencies = [
  "block2",
  "image",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

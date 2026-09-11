@@ -1,8 +1,9 @@
 # clipaste
 
-> A 9 MB Rust clipboard daemon that makes screenshot paste work in terminal-based AI
+> A lightweight Rust clipboard daemon that makes screenshot paste work in terminal-based AI
 > coding tools (Claude Code, Codex CLI, Cursor CLI) on macOS and Windows, and bridges
-> the clipboard across SSH and WSL2 boundaries. MIT licensed.
+> the clipboard across SSH and WSL2 boundaries. Graphical Linux hosts provide
+> read-only PNG capture for the SSH bridge. MIT licensed.
 
 clipaste exists because of a specific, verifiable gap: a macOS screenshot places only
 raw image bytes (TIFF/PNG) on the pasteboard, and terminals such as Ghostty and
@@ -11,33 +12,86 @@ bytes to the program they host. The keystroke arrives carrying nothing. Over SSH
 remote has no access to the local clipboard at all, so tools fall back to inserting the
 local file path as literal text — a path that does not exist on the remote.
 
-clipaste watches the clipboard, writes each screenshot to a temporary PNG, and puts that
-file's path on the clipboard alongside the image data. It also serves the same PNG on
+On macOS/Windows, clipaste watches the clipboard, saves each screenshot as a PNG,
+and adds a path alongside the image data. Linux reads PNG without changing the
+clipboard. Each host serves the staged PNG on
 `127.0.0.1:18340`, so a remote reachable through an SSH RemoteForward tunnel can fetch
 the picture rather than a meaningless path.
 
 ## Install
 
-The clipboard-host daemon supports macOS and Windows only. Native Linux clipboard
-hosting is not implemented on either Wayland or X11.
+The daemon supports macOS, Windows, and graphical Linux with usable clipboard
+access. Linux hosting reads `image/png` only; it does not add local text-path paste.
 
 | OS / context | Local clipboard-host daemon | Consumer of another host's clipboard |
 |---|---|---|
 | macOS | Supported | SSH remote via `clipaste-paste` |
 | Windows | Supported | Via WSL2 |
-| Native Linux | Not implemented | Supported over SSH via shims / `clipaste-paste` |
+| Native Linux desktop | Read-only PNG via Wayland data-control or X11/XWayland | Supported over SSH via shims / `clipaste-paste` |
+| Headless Linux | No display; host startup fails with guidance | Supported with configured helpers / SSH |
 | WSL2 | No; the Windows daemon is required | Supported via `wsl-setup` |
 
 - macOS: `brew install hqhq1025/clipaste/clipaste && brew services start clipaste`
 - Windows: `irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex`
 - Verify: `clipaste doctor` (add `--json` for machine-readable output)
-- SSH remote: `clipaste ssh-setup user@host`, run on the local Mac or Windows clipboard host with its daemon running
+- SSH remote: `clipaste ssh-setup user@host`, run on the local macOS, Windows, or graphical Linux clipboard host with its daemon running
 - WSL2: `clipaste wsl-setup` — run this inside the distro, with clipaste.exe running on Windows
 
-Linux `cargo build` and `cargo install` remain allowed for development, `doctor`,
-and consumer setup. They do not enable a local Linux daemon. A blanket
-`compile_error!` gate would also block these needed CLI tools. Linux shims consume
-images from the supported host; they do not watch the Linux clipboard.
+Linux desktop installation requires Rust/Cargo and distro tools. On Ubuntu:
+
+```bash
+sudo apt install wl-clipboard xclip curl
+git clone https://github.com/hqhq1025/clipaste.git
+cd clipaste
+cargo install --path .
+clipaste
+```
+
+Put Cargo's binary directory (normally `~/.cargo/bin`) on `PATH`. Run `clipaste`
+as your desktop user from a graphical terminal and leave it running. No Linux
+service or auto-start is installed. In a separate terminal in the same session:
+
+```bash
+clipaste doctor --json
+clipaste ssh-setup user@host
+```
+
+Linux builds retain diagnostics and consumer setup, including `wsl-setup`.
+Consumer shims fetch from HTTP; the Linux host resolves real system clipboard
+tools, not the generated shims.
+
+## Linux backend contract
+
+- `CLIPASTE_BACKEND=auto` (default): prefer system `wl-paste` with usable
+  data-control access; otherwise warn and use system `xclip` through an
+  accessible `DISPLAY`, or fail with actionable guidance if unavailable.
+- Native Wayland requires `wl-clipboard >=2.2` for empty-selection watch events.
+  All Wayland clipboard accesses use `wl-paste --watch` in bounded one-shot mode,
+  which refuses popup fallback and verifies actual compiled-in data-control
+  support. Ext-only compositors need `wl-clipboard >=2.3` built with
+  `ext-data-control` support; `wlr-data-control` works with compatible 2.2+
+  builds. Version 2.1.x triggers the `auto` XWayland fallback or fails without
+  `DISPLAY`.
+- `CLIPASTE_BACKEND=wayland` requires native data-control access and fails instead
+  of falling back. `CLIPASTE_BACKEND=x11` requires `xclip` and an accessible
+  `DISPLAY`. Apply the same override to the daemon and `doctor`.
+- No display fails with guidance to run from a graphical desktop or configure a
+  consumer. Wayland-only without data-control fails with guidance to use an
+  XWayland clipboard bridge (`xclip` + `DISPLAY`) or an X11 session. No forced-focus
+  polling or popup workaround is used.
+- GNOME Wayland may need the XWayland clipboard bridge. Reporters must test a
+  screenshot copied from a native Wayland app, re-run `doctor`, and verify the
+  image fetched by `clipaste-paste` in a new SSH session. An X11-only test does
+  not prove native Wayland support; universal compatibility has not been tested.
+- Linux polls every 300 ms: clipboard `image/png` -> private stable PNG cache ->
+  existing loopback HTTP -> SSH shims / `clipaste-paste`. It adds no file URLs
+  or text to the clipboard and makes no promise of local terminal text-path
+  paste. Image file-copy offering only a URI is not supported yet.
+- Clipboard clears, non-image content, and recognized private markers clear the
+  staged image; historical cached paths remain. The cache is private (`0700`
+  directories, `0600` files) and has no automatic expiry.
+- Existing macOS/Windows paste workflows are unchanged. Linux verification
+  does not establish macOS/Windows regression coverage.
 
 ## Paste gesture by tool and location
 
@@ -62,30 +116,44 @@ Never press Cmd+V inside an SSH session — it sends the local file path as text
 Exit code: 0 usable (including warnings), 1 broken, 2 bad arguments. All setup
 commands are non-interactive and idempotent.
 
-The `unsupported-host` extension reports `fail` (exit 1) for an unsupported local
-machine without WSL context, an SSH session, or a configured consumer helper.
-Its `platform` check gives guidance in `detail` with `fix: null`.
-WSL takes precedence over SSH. Actual SSH sessions, including SSH into macOS,
-remain `ssh-remote`; a configured Linux consumer also retains `ssh-remote` when
-SSH environment variables are absent.
+WSL takes precedence over SSH and remains a Windows consumer even with display
+variables. Actual SSH sessions, including SSH into macOS or graphical Linux,
+remain `ssh-remote`. Graphical local Linux is `clipboard-host`; configured
+headless Linux consumers retain `ssh-remote` without SSH environment variables.
+Headless Linux without consumer indicators gets `clipboard-host` diagnostics
+with a failing `backend` check and graphical-session guidance.
+`unsupported-host` remains in the contract for platforms without a backend;
+it is not a blanket Linux classification.
 
-`unsupported-host` is a capability failure, not a missing systemd service, PATH
-entry, or `curl` dependency. To use Linux as a consumer, run `ssh-setup` on the
-Mac or Windows clipboard host with its daemon running, then open a new SSH
-session. WSL2 requires the Windows daemon and `wsl-setup` inside the distro.
-No command enables a native Linux clipboard backend.
+Run Linux host diagnostics as the same desktop user/session as the daemon:
+Wayland needs `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`; X11/XWayland needs `DISPLAY`
+and display authorization. Preserve the same `CLIPASTE_BACKEND`. SSH, `sudo`,
+stale tmux sessions, and services can lack this context. Setting a display
+variable alone does not grant access. Follow the reported tool/session/protocol
+remedy; neither installing `curl` nor adding a service supplies desktop access.
+An empty clipboard warning is normal before copying a screenshot.
 
 ## Key facts
 
-- Written in Rust, ~1,600 lines, no runtime dependencies beyond OS clipboard APIs
-- ~9 MB resident memory, no measurable idle CPU
+- Written in Rust; Linux requires system clipboard tools, and CLI HTTP uses `curl`
+- Existing macOS/Windows footprint: ~9 MB resident memory, no measurable idle CPU;
+  this is not a Linux measurement, since Linux polls and invokes system tools
 - macOS: NSPasteboard change-counter watcher. Windows: event-driven via `AddClipboardFormatListener`, no polling
+- Linux: read-only PNG polling every 300 ms; does not rewrite clipboard formats
 - HTTP server binds to `127.0.0.1` only and is never exposed to the network
 - Screenshots use stable local SHA-256 cache paths with no automatic expiry;
   identical images reuse a path. Storage grows with unique images, and manual
   deletion invalidates saved paths.
 - WSL2 host detection probes candidate addresses rather than reading `/etc/resolv.conf` alone, so `networkingMode=mirrored` and NAT both work
 - Terminals: Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, Windows Terminal
+
+## Opt-in Linux verification
+
+Run `bash tests/linux/run.sh` from the repository root on Linux for real
+clipboard-tool tests in isolated Xvfb/headless Sway sessions. Tests use temporary
+HOME/cache/runtime directories, not the real user's clipboard. See `AGENTS.md`
+for prerequisites and the `tests/linux/Dockerfile` container recipe. This does
+not replace testing a screenshot from a native app on the reporter's compositor.
 
 ## Links
 

@@ -4,15 +4,15 @@ Fix screenshot paste in terminal AI tools — locally, over SSH, and in WSL2.
 
 **[hqhq1025.github.io/clipaste](https://hqhq1025.github.io/clipaste/)** · [AGENTS.md](AGENTS.md) · [Issues](https://github.com/hqhq1025/clipaste/issues)
 
-**clipaste** is a lightweight clipboard daemon for developers who use terminal-based AI coding tools like Claude Code, Codex CLI, and Cursor. Install with one command via Homebrew (macOS) or PowerShell (Windows), and screenshot paste just works — in Ghostty, Alacritty, iTerm2, Kitty, WezTerm, and more. It also bridges your clipboard to remote servers over SSH and to WSL2 environments. Written in Rust, clipaste uses only 9 MB of RAM with 0% CPU overhead.
+**clipaste** is a lightweight Rust clipboard daemon for developers who use terminal-based AI coding tools like Claude Code, Codex CLI, and Cursor. It fixes local screenshot paste on macOS and Windows, bridges their clipboards to remote servers over SSH, and connects Windows to WSL2. Graphical Linux hosts can also serve clipboard PNG images over SSH using the read-only backend described below.
 
 **Problem:** You take a screenshot, switch to Claude Code / Codex / Cursor in your terminal, press **Ctrl+V** — nothing happens. Or you're SSH'd into a remote server and can't paste screenshots at all.
 
 **Why:** macOS screenshots only put raw image data (TIFF/PNG) on the clipboard. Terminals like Ghostty and Alacritty can only Cmd+V paste text or file URLs — they can't paste raw image data. Over SSH, the remote server has no access to your local clipboard whatsoever.
 
-**Solution:** clipaste is a tiny background daemon (9 MB RAM, 0% CPU) that:
+**Solution:** clipaste is a background daemon that:
 
-1. **Local paste:** Saves screenshots as temp PNG files and registers the file path on the clipboard, so **Cmd+V** works in terminals. Also adds the legacy PNGf type so **Ctrl+V** image paste works too.
+1. **Local paste on macOS / Windows:** Saves screenshots as PNG files and adds a path alongside the image. On macOS, this enables **Cmd+V** in terminals and adds the legacy PNGf type for **Ctrl+V** image paste. Linux reads the clipboard without adding a path or changing its formats.
 
 2. **SSH remote paste:** Runs an HTTP server on `localhost:18340`. Use `clipaste ssh-setup` to configure a remote server — it installs an xclip shim and SSH tunnel so **Ctrl+V** in remote Claude Code fetches the image from your local machine.
 
@@ -20,19 +20,22 @@ Fix screenshot paste in terminal AI tools — locally, over SSH, and in WSL2.
 
 ### Supported platforms
 
-The clipboard-host daemon runs on macOS and Windows only. Native Linux clipboard
-hosting is not implemented, for either Wayland or X11.
+The clipboard-host daemon runs on macOS, Windows, and graphical Linux sessions
+with a usable clipboard backend. Linux hosting is read-only and accepts
+`image/png`; desktop/compositor compatibility must be verified in the user's session.
 
 | OS / context | Local clipboard-host daemon | Consumer of another host's clipboard |
 |---|---|---|
 | macOS | Supported | SSH remote via `clipaste-paste` |
 | Windows | Supported | Via WSL2, as described below |
-| Native Linux | Not implemented | Supported over SSH via shims / `clipaste-paste` |
+| Native Linux desktop | PNG hosting via Wayland data-control or X11/XWayland; see requirements below | Supported over SSH via shims / `clipaste-paste` |
+| Headless Linux | No desktop clipboard; host startup fails with guidance | Supported with configured helpers / SSH |
 | WSL2 | No; the Windows daemon is required | Supported via `wsl-setup` |
 
-Linux shims fetch images from an existing macOS or Windows daemon; they do not
-watch the Linux desktop clipboard. Run `ssh-setup` on that local Mac or Windows
-clipboard host with its daemon running. On macOS remotes, use `clipaste-paste`.
+Linux consumer shims fetch images from an existing macOS, Windows, or graphical
+Linux host daemon. The Linux host uses real system clipboard tools, never these
+HTTP shims. Run `ssh-setup` on the clipboard host with its daemon running.
+On macOS remotes, use `clipaste-paste`.
 
 ### Clipboard history and cache
 
@@ -43,6 +46,11 @@ Cached images no longer expire automatically after one hour, so saved history
 paths remain usable. Storage grows with unique images; deleting cached files
 invalidates history entries that reference those paths.
 See [clipboard history compatibility](docs/clipboard-history.md) for details.
+
+Linux also uses the private stable PNG cache (`~/.cache/clipaste`, directory
+mode `0700`, files `0600`). Clearing the clipboard, copying non-image content,
+or encountering a recognized private marker clears the staged image served over
+HTTP. Historical cached paths are retained; clearing the clipboard does not erase them.
 
 ### macOS (Homebrew)
 
@@ -57,24 +65,81 @@ brew services start clipaste
 irm https://raw.githubusercontent.com/hqhq1025/clipaste/main/install.ps1 | iex
 ```
 
-### Build from source
+### Linux desktop (from source)
 
-`cargo build` and `cargo install` remain allowed on Linux for development,
-`doctor`, and consumer setup, including WSL2 setup. A successful build or install
-does not make Linux a supported local clipboard host. There is no blanket
-`compile_error!` gate because these CLI tools are needed on consumer machines.
+Install Rust/Cargo first. On Ubuntu, install the distro clipboard tools and
+`curl`, then build and install from the source checkout. These Linux instructions
+describe source builds, not a tagged Linux binary release:
 
 ```bash
+sudo apt install wl-clipboard xclip curl
 git clone https://github.com/hqhq1025/clipaste.git
 cd clipaste
-cargo build --release
+cargo install --path .
+clipaste
 ```
+
+Run `clipaste` as your desktop user in a terminal opened from the graphical
+session, and leave it running. Ensure Cargo's binary directory (`~/.cargo/bin`
+by default) is on `PATH`. No Linux service or automatic startup is installed.
+In a separate terminal in the same desktop session, verify and configure SSH:
+
+```bash
+clipaste doctor --json
+clipaste ssh-setup user@your-server
+```
+
+Take a screenshot copied as image data, re-run `doctor`, then open a new SSH
+session and test `clipaste-paste` or the supported remote tool's paste gesture.
+An empty clipboard warning before taking the screenshot is normal.
+
+| `CLIPASTE_BACKEND` | Selection and requirements |
+|---|---|
+| `auto` (default) | Prefer native Wayland when data-control is available; otherwise use system `xclip` through `DISPLAY`, warning when falling back from Wayland to XWayland |
+| `wayland` | Require real system `wl-paste` with usable data-control access as described below; fail instead of falling back |
+| `x11` | Require real system `xclip` and a usable `DISPLAY`, using X11 or the compositor's XWayland clipboard bridge |
+
+For example, `CLIPASTE_BACKEND=x11 clipaste` selects X11 explicitly. Use the
+same override for diagnostics: `CLIPASTE_BACKEND=x11 clipaste doctor --json`.
+Native Wayland requires `wl-clipboard >=2.2` for empty-selection watch events.
+All Wayland clipboard accesses use `wl-paste --watch` in bounded one-shot mode,
+which refuses popup fallback and verifies actual compiled-in data-control
+support. Ext-only compositors need `wl-clipboard >=2.3` built with
+`ext-data-control` support; `wlr-data-control` works with compatible 2.2+ builds.
+With 2.1.x or unavailable data-control, `auto` warns and falls back to XWayland
+through system `xclip` and an accessible `DISPLAY`; without that, it fails with
+guidance to upgrade or use an X11 session. No forced-focus polling is used.
+
+GNOME Wayland may need the XWayland clipboard bridge. Its behavior depends on
+the compositor and source application: reporters must test a screenshot copied
+from a native Wayland app and verify the image received on the remote. An
+X11-only copy test does not establish native Wayland compatibility. Universal
+desktop/compositor compatibility has not been tested.
+
+Linux polls every 300 ms and reads only `image/png`. The pipeline is clipboard
+PNG -> private stable PNG cache -> existing loopback HTTP server -> SSH shims /
+`clipaste-paste`. It does not write file URLs or text back to the Linux clipboard,
+so local terminal text-path paste is not promised. Copying an image file in a
+file manager that offers only a URI is not supported yet; copy the image pixels
+or a screenshot instead. Existing macOS and Windows paste workflows remain unchanged.
+
+### Build from source
+
+For development on any supported platform, use `cargo build --release` from the
+checkout. Linux builds also retain `doctor` and consumer setup commands,
+including `wsl-setup`; WSL2 remains a consumer of the Windows daemon.
+
+For opt-in verification with real clipboard tools, run `bash tests/linux/run.sh`
+from the repository root on Linux. It starts isolated Xvfb and headless Sway
+sessions and uses temporary test state, not your real desktop clipboard.
+See [test prerequisites and container recipe](AGENTS.md#build-and-test).
+This does not replace the native-app screenshot check for your own compositor.
 
 ## SSH Remote Paste
 
 clipaste can bridge your local clipboard to remote servers over SSH. Run this
-one-time setup on your local Mac or Windows clipboard host, with its daemon
-running, not on the Linux consumer:
+one-time setup on your local macOS, Windows, or graphical Linux clipboard host,
+with its daemon running, not on the remote consumer:
 
 ```bash
 clipaste ssh-setup user@your-server
@@ -92,7 +157,7 @@ After setup, open a **new** SSH session:
 
 ```bash
 ssh user@your-server
-claude   # Ctrl+V pastes screenshots from your local Mac (Linux remote)
+claude   # Ctrl+V pastes screenshots from your clipboard host (Linux remote)
 codex    # run `clipaste-paste`, then paste the printed path (see below)
 ```
 
@@ -107,15 +172,16 @@ use the `clipaste-paste` helper that `ssh-setup` installs:
 clipaste-paste            # → /tmp/clipaste-<ts>.png  (a real file on the remote)
 ```
 
-Take a screenshot (or copy an image file) on your Mac, run `clipaste-paste` on the
-remote, and hand the printed path to Codex / Claude Code — both accept an image
-file path. This works the same on Linux and macOS remotes.
+Copy a screenshot on the clipboard host, run `clipaste-paste` on the remote,
+and hand the printed path to Codex / Claude Code. On macOS, copying an image
+file also works; Linux currently requires clipboard `image/png`, not a file URI.
+The helper works on both Linux and macOS remotes.
 
 ### How SSH paste works (Claude Code, Linux remote)
 
 ```
-Local Mac                          Remote Server (via SSH)
-─────────                          ──────────────────────
+Clipboard host                     Remote Server (via SSH)
+──────────────                     ──────────────────────
 Screenshot                         Claude Code runs "xclip"
     │                                      │
     ▼                                      ▼
@@ -204,9 +270,12 @@ remotes use the `clipaste-paste` helper instead (Codex bypasses the xclip shim).
 
 ## Compatibility
 
-Local support below means a macOS or Windows clipboard host, not a native Linux
-host. SSH Ctrl+V support means a Linux consumer using the shims; macOS remotes
-use `clipaste-paste`. WSL2 always requires the Windows daemon.
+Local paste shortcuts below apply to macOS and Windows. Linux hosting supplies
+PNG images to the SSH bridge without adding local text-path paste. SSH Ctrl+V
+means a Linux consumer using the shims, backed by any supported clipboard host;
+macOS remotes use `clipaste-paste`. WSL2 always requires the Windows daemon.
+The Linux backend does not change the existing macOS/Windows workflows, and
+these tables do not certify every Linux desktop, compositor, or application.
 
 | Terminal | macOS Cmd+V | macOS Ctrl+V | Windows Ctrl+V | SSH Ctrl+V | WSL2 Ctrl+V |
 |----------|:-----------:|:------------:|:--------------:|:----------:|:-----------:|
@@ -218,7 +287,7 @@ use `clipaste-paste`. WSL2 always requires the Windows daemon.
 | Kitty    | ✅          | ✅           | ✅             | ✅         | ✅          |
 | Windows Terminal | —   | —            | ✅             | —          | ✅          |
 
-| AI Tool | Local | SSH Remote | WSL2 |
+| AI Tool | Local macOS / Windows | SSH Remote | WSL2 |
 |---------|:-----:|:----------:|:----:|
 | Claude Code | ✅ | ✅ Ctrl+V | ✅ Ctrl+V |
 | Codex CLI   | ✅ | ⚠️ via `clipaste-paste` | ⚠️ via `clipaste-paste` |
@@ -259,20 +328,24 @@ Exit code is `0` when usable (including warnings), `1` when broken, `2` on bad
 arguments. Every setup command is non-interactive and idempotent, so an agent
 can run them unattended.
 
-`unsupported-host` extends the role contract for an unsupported local machine
-with no WSL context, SSH session, or configured consumer helper. It reports
-`fail` with exit code `1`; its `platform` check explains the limit with `fix: null`.
-WSL detection takes precedence over SSH; actual SSH
-sessions remain `ssh-remote`, including SSH into macOS. A configured Linux
-consumer also remains `ssh-remote` when SSH environment variables are absent,
-so helper and bridge diagnostics still apply.
+WSL detection takes precedence over SSH and remains `wsl2`, even with graphical
+environment variables. Actual SSH sessions remain `ssh-remote`, including SSH
+into macOS or a Linux desktop. A graphical local Linux session is a
+`clipboard-host`; a headless Linux machine with a configured consumer helper
+remains `ssh-remote` even without SSH variables. Headless Linux with no consumer
+indicators gets `clipboard-host` diagnostics with a failing `backend` check.
+`unsupported-host` remains in the contract for platforms without a backend;
+it is not a blanket Linux result.
 
-An `unsupported-host` failure is a platform capability limit, not a missing
-systemd service, PATH entry, or `curl` dependency. Those changes cannot enable
-a Linux clipboard host. To consume another machine's clipboard, start the
-daemon on a Mac or Windows host, run `ssh-setup` there, and open a new SSH
-session to Linux; for WSL2, keep the Windows daemon running and use `wsl-setup`.
-There is no command that enables a native Linux backend.
+Run Linux host diagnostics as the same desktop user, from the same graphical
+session as the daemon, with the same `CLIPASTE_BACKEND` override. Wayland needs
+the session's `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`; X11/XWayland needs `DISPLAY`
+and authorization to that display. An SSH shell, `sudo`, a stale tmux session,
+or a service missing that environment may produce different diagnostics.
+Setting a display variable alone does not create or authorize a desktop session.
+With no display, host startup fails with guidance to run from the desktop or
+configure a consumer. Missing tools and missing data-control need their stated
+remedies; installing `curl` or a systemd service does not grant clipboard access.
 
 ## Managing
 
@@ -291,11 +364,20 @@ taskkill /IM clipaste.exe /F                      # stop
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "clipaste"  # disable auto-start
 ```
 
+### Linux
+
+Keep `clipaste` running in its graphical-session terminal; stop it with Ctrl+C.
+Restart it there after changing `CLIPASTE_BACKEND`. No Linux service is installed
+automatically. Run `clipaste doctor --json` in a separate desktop terminal.
+
 ## FAQ
 
 ### How do I paste screenshots in Claude Code?
 
 Install clipaste with `brew install hqhq1025/clipaste/clipaste && brew services start clipaste` on macOS, or the PowerShell one-liner on Windows. Once running, take a screenshot and press **Ctrl+V** in Claude Code — the image pastes automatically. No configuration needed. clipaste runs as a background daemon and handles the clipboard conversion for you.
+
+For a Linux clipboard host, follow [Linux desktop setup](#linux-desktop-from-source)
+and the SSH workflow. The read-only backend does not add local text-path paste.
 
 ### Why can't I paste images in my terminal on macOS?
 
@@ -303,9 +385,9 @@ macOS screenshots place raw TIFF/PNG image data on the clipboard, but terminals 
 
 ### How do I paste clipboard images over SSH?
 
-Run `clipaste ssh-setup user@your-server` once on your local Mac or Windows
-clipboard host with its daemon running (add `-p PORT` for a non-default SSH
-port). It detects the remote OS, installs a lightweight
+Run `clipaste ssh-setup user@your-server` once on your local macOS, Windows, or
+graphical Linux clipboard host with its daemon running (add `-p PORT` for a
+non-default SSH port). It detects the remote OS, installs a lightweight
 xclip shim (Linux) plus a universal `clipaste-paste` helper, and configures an SSH
 tunnel. After setup, open a new SSH session:
 
@@ -327,11 +409,18 @@ automatically — see [WSL2 networking modes](#wsl2-networking-modes).
 
 ### How much memory and CPU does clipaste use?
 
-clipaste uses approximately 9 MB of RAM and 0% CPU when idle. It is written in Rust and runs as a tiny background daemon. On macOS it is managed via `brew services`; on Windows it auto-starts via a Registry Run key. It has no runtime dependencies beyond the OS clipboard APIs.
+The existing macOS/Windows footprint is approximately 9 MB of RAM with no
+measurable idle CPU. That is not a Linux measurement: Linux polls every 300 ms
+and invokes system clipboard tools. macOS uses `brew services`; Windows uses a
+Registry Run key. Linux runs from the graphical session and requires the distro
+tools listed above.
 
 ### Which terminals and AI tools does clipaste support?
 
 clipaste works with Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty, and Windows Terminal. It supports Claude Code, Codex CLI, and Cursor CLI. **Cmd+V** (macOS local) and **Ctrl+V** (local, plus SSH/WSL2 for shim-based tools like Claude Code) are supported; Codex CLI and macOS remotes use the `clipaste-paste` helper. See the compatibility tables above for the full matrix.
+
+Local shortcuts here refer to macOS/Windows. Linux host compatibility depends
+on clipboard access and the source app; verify it with a real screenshot.
 
 ## How is this different from...
 

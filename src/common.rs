@@ -1,8 +1,14 @@
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 use image::codecs::png::PngEncoder;
-use image::{ImageEncoder, ImageFormat};
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+use image::ImageEncoder;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use image::ImageFormat;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{self, Cursor, Write};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::io::Cursor;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,17 +18,15 @@ pub const VERSION: &str = "2.4.2";
 pub const DEFAULT_PORT: u16 = 18340;
 
 pub fn supports_clipboard_host(os: &str) -> bool {
-    matches!(os, "macos" | "windows")
+    matches!(os, "macos" | "windows" | "linux")
 }
 
 pub fn unsupported_host_message(os: &str) -> String {
-    let name = if os == "linux" { "Linux" } else { os };
     format!(
-        "{name} clipboard host is not supported. The daemon requires macOS or Windows.\n\
+        "{os} clipboard host is not supported. The daemon requires macOS, Windows, or a Linux desktop.\n\
          Linux is supported as an SSH consumer: run `clipaste ssh-setup user@host` on \
-         the macOS/Windows clipboard host, then use `clipaste-paste` on the remote.\n\
+         the clipboard host, then use `clipaste-paste` on the remote.\n\
          In WSL2, run `clipaste wsl-setup` with clipaste.exe running on Windows.\n\
-         Installing the Rust binary does not add a Linux clipboard backend.\n\
          See https://github.com/hqhq1025/clipaste#supported-platforms"
     )
 }
@@ -314,6 +318,7 @@ fn save_png_in_dir(dir: &Path, png_data: &[u8]) -> io::Result<PathBuf> {
 /// Kept for existing callers. Published PNGs have no automatic expiry because
 /// external clipboard histories retain their paths. Remove them explicitly to
 /// reclaim disk space; interrupted staging files may also be removed manually.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn clean_old_temp_files() {}
 
 /// Convert TIFF bytes to PNG bytes
@@ -422,7 +427,7 @@ pub fn print_help() {
         "clipaste v{VERSION} — Fix screenshot paste in terminals (local + SSH + WSL2)
 
 USAGE
-  clipaste                       Run daemon (macOS/Windows clipboard host only)
+  clipaste                       Run daemon (macOS, Windows, Linux desktop)
   clipaste doctor [--json]       Diagnose this machine and print the fix command
   clipaste ssh-setup user@host   Configure remote server for image paste via SSH
                                  (add -p PORT for a custom SSH port)
@@ -443,7 +448,8 @@ FOR CODING AGENTS
 
 WHAT IT DOES
   Local:  Watches the clipboard. When a screenshot is detected, saves it as
-          a temp PNG and registers the file path. Cmd+V / Ctrl+V just work.
+          a cached PNG. macOS/Windows also register the file path for pasting.
+          Linux reads image/png without modifying the clipboard.
 
   SSH:    Runs an HTTP server on port {DEFAULT_PORT}. Use 'ssh-setup' to
           configure SSH RemoteForward + xclip shim on a remote server.
@@ -456,14 +462,17 @@ WHAT IT DOES
           networking modes both work); override it with --host IP if needed.
 
 COMPATIBILITY
-  Host:    macOS and Windows only; native Linux clipboard hosts are unsupported
+  Host:    macOS, Windows, Linux desktop (Wayland data-control or X11/XWayland)
   macOS:   Ghostty, Alacritty, iTerm2, Terminal.app, WezTerm, Kitty
   Windows: Windows Terminal, PowerShell, cmd.exe
-  Remote:  Linux and macOS via SSH from a macOS/Windows clipboard host
+  Remote:  Linux and macOS via SSH from a supported clipboard host
   WSL2:    Consumer only; requires clipaste.exe running on Windows
 
-  Building/installing this binary on Linux provides doctor and setup commands,
-  not a local clipboard watcher. Run ssh-setup on the macOS/Windows host.
+  Linux:   Install wl-clipboard 2.2+ for native Wayland, or xclip
+           for X11/XWayland, plus curl. Run inside your graphical session.
+           Auto mode warns before using XWayland if data-control is unavailable.
+           CLIPASTE_BACKEND=wayland or x11 selects a backend explicitly.
+           No local text-path injection; SSH consumers use the existing helpers.
 
 MORE INFO
   https://github.com/hqhq1025/clipaste"

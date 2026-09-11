@@ -1,5 +1,7 @@
 mod common;
 mod doctor;
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 mod server;
@@ -62,9 +64,21 @@ fn main() {
     // Reject unsupported hosts before starting a listener or touching the cache.
     require_clipboard_host();
 
+    #[cfg(target_os = "linux")]
+    let backend = linux::install_signal_handlers()
+        .map_err(|e| e.to_string())
+        .and_then(|_| linux::detect())
+        .unwrap_or_else(|e| {
+            eprintln!("clipaste: {e}");
+            std::process::exit(1);
+        });
+
     // Start HTTP server for remote access
     let latest = common::LatestImage::default();
-    server::start(latest.clone());
+    if let Err(e) = server::start(latest.clone()) {
+        eprintln!("clipaste: cannot start HTTP server: {e}");
+        std::process::exit(1);
+    }
 
     // Start clipboard watcher (platform-specific)
     #[cfg(target_os = "macos")]
@@ -72,12 +86,26 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     windows::run(latest);
+
+    #[cfg(target_os = "linux")]
+    if let Err(e) = linux::run(backend, latest) {
+        eprintln!("clipaste: {e}");
+        std::process::exit(1);
+    }
 }
 
 fn require_clipboard_host() {
     let os = std::env::consts::OS;
     if !common::supports_clipboard_host(os) {
         eprintln!("clipaste: {}", common::unsupported_host_message(os));
+        std::process::exit(1);
+    }
+    #[cfg(target_os = "linux")]
+    if doctor::is_wsl() {
+        eprintln!(
+            "clipaste: WSL2 is a clipboard consumer. Run clipaste.exe on Windows \
+            and clipaste wsl-setup inside WSL2."
+        );
         std::process::exit(1);
     }
 }
