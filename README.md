@@ -77,10 +77,10 @@ sudo apt install wl-clipboard xclip curl
 
 Download and extract the archive matching your architecture:
 
-| `uname -m` | v2.5.0 archive |
+| `uname -m` | v2.6.0 archive |
 |---|---|
-| `x86_64` | `clipaste-v2.5.0-x86_64-unknown-linux-musl.tar.gz` |
-| `aarch64` / `arm64` | `clipaste-v2.5.0-aarch64-unknown-linux-musl.tar.gz` |
+| `x86_64` | `clipaste-v2.6.0-x86_64-unknown-linux-musl.tar.gz` |
+| `aarch64` / `arm64` | `clipaste-v2.6.0-aarch64-unknown-linux-musl.tar.gz` |
 
 The release includes `SHA256SUMS` for verifying the archives. From the directory
 containing the extracted `clipaste` binary:
@@ -140,7 +140,7 @@ or a screenshot instead. Existing macOS and Windows paste workflows remain uncha
 With Rust/Cargo installed, build the tagged release on any supported host:
 
 ```bash
-cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked
+cargo install --git https://github.com/hqhq1025/clipaste --tag v2.6.0 --locked
 ```
 
 Put Cargo's binary directory (normally `~/.cargo/bin`) on `PATH`. Linux still

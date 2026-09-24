@@ -43,7 +43,7 @@ access. Linux hosting reads `image/png` only; it does not add local text-path pa
   `daemon` check; `brew services` cannot set the variable, so macOS needs a user
   LaunchAgent (see the README)
 
-Linux v2.5.0 release archives include static x86_64 and ARM64 binaries.
+Linux release archives (since v2.5.0) include static x86_64 and ARM64 binaries.
 Install distro tools first (Ubuntu example):
 
 ```bash
@@ -51,7 +51,7 @@ sudo apt install wl-clipboard xclip curl
 ```
 
 Download the matching `x86_64-unknown-linux-musl` or
-`aarch64-unknown-linux-musl` archive from the v2.5.0 release, verify it against
+`aarch64-unknown-linux-musl` archive from the v2.6.0 release, verify it against
 `SHA256SUMS`, and extract it. Then:
 
 ```bash
@@ -61,7 +61,7 @@ clipaste
 ```
 
 For source installation with Rust/Cargo:
-`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked`.
+`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.6.0 --locked`.
 Source installs use `~/.cargo/bin`; extracted binaries above use `~/.local/bin`.
 Keep the relevant directory on `PATH`. Run `clipaste`
 as your desktop user from a graphical terminal and leave it running. No Linux

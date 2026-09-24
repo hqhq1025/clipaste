@@ -131,7 +131,7 @@ Linux desktop (Ubuntu package example):
 sudo apt install wl-clipboard xclip curl
 ```
 
-v2.5.0 releases include static Linux archives for `x86_64-unknown-linux-musl`
+Releases since v2.5.0 include static Linux archives for `x86_64-unknown-linux-musl`
 and `aarch64-unknown-linux-musl`. Download the matching architecture, verify
 against the release's `SHA256SUMS`, extract it, then:
 
@@ -142,7 +142,7 @@ clipaste
 ```
 
 Source installation with Rust/Cargo is also supported:
-`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.5.0 --locked`.
+`cargo install --git https://github.com/hqhq1025/clipaste --tag v2.6.0 --locked`.
 Ensure the appropriate binary directory (`~/.local/bin` for the extracted
 archive or normally `~/.cargo/bin` for Cargo) is on `PATH`. Start
 `clipaste` as the desktop user in a graphical-session terminal and leave it
