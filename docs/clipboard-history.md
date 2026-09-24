@@ -20,6 +20,9 @@ Only one image-normalizing daemon should be enabled. A legacy
 `clipboard-normalizer` LaunchAgent duplicates Clipaste's responsibility and
 should be disabled when Clipaste is in use.
 
+With `CLIPASTE_SERVER_ONLY=1`, Clipaste never publishes this item: history
+managers record only the original copy, which carries no file path.
+
 ## Cache Lifetime
 
 PNG files use `shot-sha256-<digest>.png` names under the existing Clipaste cache

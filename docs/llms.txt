@@ -36,6 +36,12 @@ access. Linux hosting reads `image/png` only; it does not add local text-path pa
 - Verify: `clipaste doctor` (add `--json` for machine-readable output)
 - SSH remote: `clipaste ssh-setup user@host`, run on the local macOS, Windows, or graphical Linux clipboard host with its daemon running
 - WSL2: `clipaste wsl-setup` — run this inside the distro, with clipaste.exe running on Windows
+- Server-only mode: set `CLIPASTE_SERVER_ONLY=1` in the macOS/Windows daemon's
+  environment when the user only pastes remotely or GUI apps paste a path instead
+  of the image. The clipboard is left as copied, images are still served over
+  HTTP, and local terminals get no path. `doctor` reports `server-only` in its
+  `daemon` check; `brew services` cannot set the variable, so macOS needs a user
+  LaunchAgent (see the README)
 
 Linux v2.5.0 release archives include static x86_64 and ARM64 binaries.
 Install distro tools first (Ubuntu example):

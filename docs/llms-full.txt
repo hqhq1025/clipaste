@@ -63,6 +63,16 @@ never leaves loopback except through the user's own SSH connection.
 **In WSL2.** No tunnel is needed; WSL reaches the Windows host directly. `clipaste
 wsl-setup` installs the same shims inside the distro, pointed at clipaste.exe on Windows.
 
+**Server-only mode.** With `CLIPASTE_SERVER_ONLY=1` in the daemon's environment,
+macOS and Windows stage and serve images exactly as above but never rewrite the
+local clipboard, so GUI apps keep pasting the original image. On Windows the
+default rewrite removes `CF_DIB`, which is why apps such as Slack or Word paste a
+path there. Local terminals get no path in this mode. `brew services` cannot pass
+the variable, so macOS needs a user LaunchAgent with `EnvironmentVariables`; on
+Windows, `setx CLIPASTE_SERVER_ONLY 1` survives reinstalls. Only `1` enables it;
+`0` or unset keeps the default, and other values stop the daemon at startup.
+Linux never modifies the clipboard, so the variable changes nothing there.
+
 ---
 
 ## Commands
@@ -271,6 +281,7 @@ unavailable, forward the port on the Windows side with `netsh interface portprox
 | Codex CLI | Ctrl+V | `clipaste-paste` | `clipaste-paste` | `clipaste-paste` |
 
 On macOS locally, Cmd+V also works — that is the case the file-path trick was built for.
+It needs the default mode; with `CLIPASTE_SERVER_ONLY=1` no path is added.
 
 The local column does not apply to Linux hosts. Linux adds no clipboard text or
 file URLs; its supported host workflow supplies PNG images to remote consumers.
@@ -324,6 +335,9 @@ Contract:
 - Exit code is `0` when usable (including warnings), `1` when broken, `2` on bad arguments.
 - A `warn` is not a failure. "No screenshot staged yet" is the normal state of a fresh
   install; treating it as a fault causes an agent to loop.
+- On a clipboard host, the `daemon` check detail contains `server-only` when the
+  running daemon has `CLIPASTE_SERVER_ONLY=1`. Local terminals then get no file
+  path by design. Daemons from v2.5.0 and earlier ignore the variable.
 
 `unsupported-host` remains in the contract for platforms without a backend; it
 is not a blanket Linux classification. Linux without a display or consumer
@@ -396,11 +410,14 @@ Linux verification is not a substitute for macOS/Windows regression checks.
   temp-file URL plus `public.png`, `com.apple.pboard.type.PNGf` and a plain-text path.
   When the clipboard instead holds a *file URL* pointing at an image (a screenshot saved
   to disk and then copied in Finder), the file is captured for remote serving without
-  touching the local clipboard.
+  touching the local clipboard. In server-only mode, image data is captured the same
+  way: the pasteboard is never rewritten, and a capture is discarded if the change
+  count moved during conversion.
 - **Windows**: fully event-driven. A hidden `HWND_MESSAGE` window registers via
   `AddClipboardFormatListener` and handles `WM_CLIPBOARDUPDATE`, de-duplicated with
   `GetClipboardSequenceNumber`. `CF_DIB` is converted to PNG and the path written back as
-  `CF_UNICODETEXT`. There is no polling loop.
+  `CF_UNICODETEXT`. Server-only mode skips that write, leaving `CF_DIB` in place.
+  There is no polling loop.
 - Linux: polls every 300 ms using bounded one-shot `wl-paste --watch` calls
   for Wayland data-control, or system `xclip` for X11/XWayland. Reads `image/png`
   into the private stable cache without rewriting clipboard formats. Auto
