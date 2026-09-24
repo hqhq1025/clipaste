@@ -12,7 +12,7 @@ Fix screenshot paste in terminal AI tools — locally, over SSH, and in WSL2.
 
 **Solution:** clipaste is a background daemon that:
 
-1. **Local paste on macOS / Windows:** Saves screenshots as PNG files and adds a path alongside the image. On macOS, this enables **Cmd+V** in terminals and adds the legacy PNGf type for **Ctrl+V** image paste. Linux reads the clipboard without adding a path or changing its formats.
+1. **Local paste on macOS / Windows:** Saves screenshots as PNG files and adds a path alongside the image. On macOS, this enables **Cmd+V** in terminals and adds the legacy PNGf type for **Ctrl+V** image paste. Linux reads the clipboard without adding a path or changing its formats. If you only paste into remote agents, [server-only mode](#server-only-mode) leaves the macOS/Windows clipboard unmodified too.
 
 2. **SSH remote paste:** Runs an HTTP server on `localhost:18340`. Use `clipaste ssh-setup` to configure a remote server — it installs an xclip shim and SSH tunnel so **Ctrl+V** in remote Claude Code fetches the image from your local machine.
 
@@ -269,6 +269,63 @@ HTTP server ◄──── WSL2 network ────────► curl $WIN_H
     └──── serves PNG ──────────────► Image delivered ✅
 ```
 
+## Server-only mode
+
+By default, macOS and Windows add a file path to the clipboard next to each
+screenshot so that local terminals can paste it. If your agents only run over
+SSH or in WSL2, that path has no local use. On Windows the rewrite also removes
+the bitmap, so Slack, Word, or Paint paste the path instead of the image.
+Set `CLIPASTE_SERVER_ONLY=1` in the daemon's environment to leave the clipboard
+exactly as the screenshot tool wrote it. The daemon still caches each image and
+serves it on `127.0.0.1:18340`, so SSH and WSL2 consumers keep working, but local
+terminals no longer receive a path. Linux hosts always work this way.
+
+Windows (PowerShell):
+
+```powershell
+setx CLIPASTE_SERVER_ONLY 1       # future sign-ins and new terminals
+$env:CLIPASTE_SERVER_ONLY = "1"   # this terminal, so the restart below inherits it
+taskkill /IM clipaste.exe /F
+Start-Process "$env:LOCALAPPDATA\clipaste\clipaste.exe" -WindowStyle Hidden
+clipaste doctor
+```
+
+The Registry Run entry picks up the variable at the next sign-in, and rerunning
+`install.ps1` keeps it. To go back, repeat these commands with `0` instead of `1`.
+
+macOS: `brew services` cannot pass environment variables to the daemon, so run it
+from your own LaunchAgent instead:
+
+```bash
+brew services stop clipaste
+cat > ~/Library/LaunchAgents/io.github.hqhq1025.clipaste.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>io.github.hqhq1025.clipaste</string>
+  <key>ProgramArguments</key><array><string>$(brew --prefix)/opt/clipaste/bin/clipaste</string></array>
+  <key>EnvironmentVariables</key><dict><key>CLIPASTE_SERVER_ONLY</key><string>1</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>$(brew --prefix)/var/log/clipaste.log</string>
+</dict>
+</plist>
+EOF
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.hqhq1025.clipaste.plist
+clipaste doctor
+```
+
+Restart this agent with `launchctl kickstart -k gui/$(id -u)/io.github.hqhq1025.clipaste`;
+`brew services restart` would start a second, default-mode daemon. To go back,
+run `launchctl bootout gui/$(id -u)/io.github.hqhq1025.clipaste`, delete the
+plist, and `brew services start clipaste`.
+
+When the mode is active, the `daemon` check of `clipaste doctor` says
+`server-only`. If it does not, the running daemon did not receive the variable
+or predates this mode; v2.5.0 and earlier ignore it. Values other than `1` and
+`0` stop the daemon at startup with an error.
+
 ## Paste shortcuts
 
 | Scenario | Shortcut | How it works |
@@ -282,6 +339,10 @@ HTTP server ◄──── WSL2 network ────────► curl $WIN_H
 
 **Tip:** On a Linux remote, Claude Code pastes with Ctrl+V. Codex CLI and macOS
 remotes use the `clipaste-paste` helper instead (Codex bypasses the xclip shim).
+
+The local rows assume the default mode. [Server-only mode](#server-only-mode)
+adds neither the path nor the PNGf type, so local terminal paste may find no
+image; the remote rows are unaffected.
 
 > **Important:** In an SSH session with Claude Code, **use Ctrl+V**, never Cmd+V —
 > Cmd+V pastes the local Mac path as text, which the remote agent cannot read.

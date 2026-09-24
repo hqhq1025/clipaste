@@ -85,6 +85,7 @@ Windows -> HTTP over WSL networking -------> WSL2
   Windows daemon                            run wsl-setup inside the distro
 
 Local macOS / Windows: existing clipboard normalization and paste
+                       (skipped with CLIPASTE_SERVER_ONLY=1; HTTP serving remains)
 Local Linux: read-only PNG capture, no added text-path paste
 ```
 
@@ -249,10 +250,34 @@ Codex CLI reads the clipboard in-process (via `arboard`) and never shells out to
 file on the current host and prints the path — hand that path to the tool.
 
 The local shortcut row does not apply to Linux hosts. Linux serves clipboard
-PNG images to remote consumers without inserting a local text path.
+PNG images to remote consumers without inserting a local text path. It also
+does not apply to a macOS/Windows daemon in server-only mode (below).
 
 Never tell a user to press `Cmd+V` in an SSH session: that sends the *local*
 file path as text, which the remote agent cannot open.
+
+### Server-only mode
+
+The macOS/Windows daemon adds a file path to the local clipboard after each
+screenshot. Offer `CLIPASTE_SERVER_ONLY=1` when the user only pastes into
+agents over SSH or WSL2, or reports that GUI apps paste a path instead of the
+image (on Windows the rewrite drops the bitmap). The daemon then leaves the
+clipboard as copied and still serves images to remote consumers. Do not enable
+it for a user who pastes screenshots into local terminals: those rely on the path.
+
+- Windows: `setx CLIPASTE_SERVER_ONLY 1`, set `$env:CLIPASTE_SERVER_ONLY = "1"`
+  in the same PowerShell, then stop and restart `clipaste.exe` from it. The Run
+  entry and reinstalls keep the setting.
+- macOS: `brew services` cannot pass environment variables. Replace it with a
+  LaunchAgent that sets `EnvironmentVariables`, following the README recipe, and
+  restart that agent with `launchctl kickstart -k`, not `brew services restart`.
+- Linux never modifies the clipboard; the variable changes nothing there.
+
+Verify with `clipaste doctor --json`: the `daemon` check detail contains
+`server-only`. If it does not, the running daemon did not receive the variable
+or predates the mode (v2.5.0 and earlier ignore it). Values other than `1` and
+`0` stop the daemon at startup. In this mode, no path on the local clipboard is
+expected; do not report it as a fault.
 
 ### Things not to do
 

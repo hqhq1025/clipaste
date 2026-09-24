@@ -1,5 +1,6 @@
 use crate::common;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::DataExchange::*;
@@ -19,6 +20,8 @@ static mut LAST_SEQ: u32 = 0;
 
 /// Global shared state for the Win32 callback (wnd_proc can't capture closures)
 static LATEST: OnceLock<common::LatestImage> = OnceLock::new();
+/// Set once in `run`, before the listener can deliver any clipboard update.
+static SERVER_ONLY: AtomicBool = AtomicBool::new(false);
 
 /// Check if clipboard has image data but no text or file drop
 fn is_image_only_clipboard() -> bool {
@@ -110,7 +113,7 @@ fn write_path_to_clipboard(path: &str, png_data: &[u8]) {
     }
 }
 
-fn normalize(latest: &common::LatestImage) {
+fn normalize(latest: &common::LatestImage, server_only: bool) {
     if !is_image_only_clipboard() {
         return;
     }
@@ -133,14 +136,21 @@ fn normalize(latest: &common::LatestImage) {
         *guard = Some(file_path.clone());
     }
 
-    let path_str = file_path.to_string_lossy().to_string();
-    write_path_to_clipboard(&path_str, &png_data);
-
     let filename = file_path
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
-    common::log(&format!("normalized {filename} ({} bytes)", png_data.len()));
+    if server_only {
+        // Rewriting empties the clipboard, dropping the CF_DIB that GUI apps
+        // paste as an image (issue #13); remote consumers only need the file.
+        common::log(&format!(
+            "staged {filename} ({} bytes) for remote paste",
+            png_data.len()
+        ));
+    } else {
+        write_path_to_clipboard(&file_path.to_string_lossy(), &png_data);
+        common::log(&format!("normalized {filename} ({} bytes)", png_data.len()));
+    }
 
     common::clean_old_temp_files();
 }
@@ -157,7 +167,7 @@ unsafe extern "system" fn wnd_proc(
             if seq != LAST_SEQ {
                 LAST_SEQ = seq;
                 if let Some(latest) = LATEST.get() {
-                    normalize(latest);
+                    normalize(latest, SERVER_ONLY.load(Ordering::Relaxed));
                 }
             }
             0
@@ -170,14 +180,20 @@ unsafe extern "system" fn wnd_proc(
     }
 }
 
-pub fn run(latest: common::LatestImage) {
+pub fn run(latest: common::LatestImage, server_only: bool) {
     LATEST.set(latest).expect("LATEST already initialized");
+    SERVER_ONLY.store(server_only, Ordering::Relaxed);
     common::ensure_temp_dir();
     common::log(&format!(
         "v{} started (pid {})",
         common::VERSION,
         std::process::id()
     ));
+    if server_only {
+        common::log(
+            "server-only mode: images are served over HTTP; the clipboard is never rewritten",
+        );
+    }
 
     unsafe {
         let class_name: Vec<u16> = "clipaste_hidden\0".encode_utf16().collect();

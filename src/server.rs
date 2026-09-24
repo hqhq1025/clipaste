@@ -4,7 +4,7 @@ use std::net::TcpListener;
 
 /// Start HTTP server in a background thread.
 /// Serves the latest screenshot PNG on GET /clipboard/image.
-pub fn start(latest: LatestImage) -> std::io::Result<()> {
+pub fn start(latest: LatestImage, server_only: bool) -> std::io::Result<()> {
     let addr = format!("127.0.0.1:{}", common::DEFAULT_PORT);
     // Bind before the watcher starts, so a stale daemon/tunnel cannot be mistaken
     // for this process's successfully published clipboard.
@@ -13,13 +13,28 @@ pub fn start(latest: LatestImage) -> std::io::Result<()> {
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let latest = latest.clone();
-            std::thread::spawn(move || handle_request(stream, latest));
+            std::thread::spawn(move || handle_request(stream, latest, server_only));
         }
     });
     Ok(())
 }
 
-fn handle_request(mut stream: std::net::TcpStream, latest: LatestImage) {
+/// `mode` appears only in server-only mode, so `doctor` can explain why local
+/// paste gets no file path. Every /health reader matches substrings, so older
+/// clients keep accepting the body.
+pub(crate) fn health_body(server_only: bool) -> String {
+    let mode = if server_only {
+        ",\"mode\":\"server-only\""
+    } else {
+        ""
+    };
+    format!(
+        "{{\"status\":\"ok\",\"version\":\"{}\"{mode}}}",
+        common::VERSION
+    )
+}
+
+fn handle_request(mut stream: std::net::TcpStream, latest: LatestImage, server_only: bool) {
     let mut buf = [0u8; 2048];
     let n = match stream.read(&mut buf) {
         Ok(n) => n,
@@ -29,7 +44,7 @@ fn handle_request(mut stream: std::net::TcpStream, latest: LatestImage) {
     let first_line = request.lines().next().unwrap_or("");
 
     if first_line.starts_with("GET /health") {
-        let body = format!("{{\"status\":\"ok\",\"version\":\"{}\"}}", common::VERSION);
+        let body = health_body(server_only);
         respond(&mut stream, 200, "application/json", body.as_bytes());
     } else if first_line.starts_with("GET /clipboard/type") {
         let has_image = latest.lock().ok().and_then(|g| g.clone()).is_some();

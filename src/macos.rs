@@ -240,10 +240,42 @@ fn normalize_with_save(
     Some(own_count)
 }
 
+/// Server-only mode (issue #13): publish the image for HTTP consumers but leave
+/// the pasteboard exactly as its producer wrote it, so GUI apps keep pasting the
+/// original image rather than an added file URL or path.
+fn stage_without_rewrite(
+    pb: &NSPasteboard,
+    latest: &common::LatestImage,
+    save: impl FnOnce(&[u8]) -> Option<std::path::PathBuf>,
+) {
+    let original_count = pb.changeCount();
+    let Some(png_data) = read_png_data(pb) else {
+        common::log("failed to get PNG data from clipboard");
+        return;
+    };
+    let Some(file_path) = save(&png_data) else {
+        return;
+    };
+    // Serving an image the user has already replaced would paste the wrong
+    // picture remotely; the next poll stages whatever replaced it.
+    if pb.changeCount() != original_count {
+        common::log("discarded capture: clipboard changed during conversion");
+        return;
+    }
+    if let Ok(mut guard) = latest.lock() {
+        *guard = Some(file_path);
+    }
+    common::log(&format!(
+        "staged clipboard image ({} bytes) for remote paste",
+        png_data.len()
+    ));
+}
+
 fn poll_clipboard(
     pb: &NSPasteboard,
     latest: &common::LatestImage,
     last: &mut isize,
+    server_only: bool,
     save: impl FnOnce(&[u8]) -> Option<std::path::PathBuf>,
 ) {
     let current = pb.changeCount();
@@ -264,7 +296,9 @@ fn poll_clipboard(
             return;
         }
         *last = current;
-        if let Some(own_count) = normalize_with_save(pb, latest, save) {
+        if server_only {
+            stage_without_rewrite(pb, latest, save);
+        } else if let Some(own_count) = normalize_with_save(pb, latest, save) {
             *last = own_count;
         }
     } else {
@@ -275,13 +309,18 @@ fn poll_clipboard(
     }
 }
 
-pub fn run(latest: common::LatestImage) {
+pub fn run(latest: common::LatestImage, server_only: bool) {
     common::ensure_temp_dir();
     common::log(&format!(
         "v{} started (pid {})",
         common::VERSION,
         std::process::id()
     ));
+    if server_only {
+        common::log(
+            "server-only mode: images are served over HTTP; the clipboard is never rewritten",
+        );
+    }
 
     let pb = NSPasteboard::generalPasteboard();
 
@@ -311,7 +350,13 @@ pub fn run(latest: common::LatestImage) {
     // Use NSTimer + NSRunLoop — same mechanism as Swift's Timer, fires precisely
     let block = RcBlock::new(move |_timer: NonNull<NSTimer>| {
         let mut last = LAST_CHANGE.with(|c| c.get());
-        poll_clipboard(&pb, &latest, &mut last, common::save_png_to_temp);
+        poll_clipboard(
+            &pb,
+            &latest,
+            &mut last,
+            server_only,
+            common::save_png_to_temp,
+        );
         LAST_CHANGE.with(|c| c.set(last));
     });
 
@@ -379,13 +424,17 @@ mod tests {
             pb.clearContents();
             pb.setData_forType(Some(&NSData::with_bytes(&[index])), &png_type());
             let path = std::path::PathBuf::from(format!("/tmp/clipaste-{index}.png"));
-            poll_clipboard(&pb, &latest, &mut last, |_| Some(path.clone()));
+            poll_clipboard(&pb, &latest, &mut last, false, |_| Some(path.clone()));
             assert_eq!(*latest.lock().unwrap(), Some(path));
-            poll_clipboard(&pb, &latest, &mut last, |_| panic!("own write reprocessed"));
+            poll_clipboard(&pb, &latest, &mut last, false, |_| {
+                panic!("own write reprocessed")
+            });
         }
         pb.clearContents();
         pb.setString_forType(&NSString::from_str("text"), &string_type());
-        poll_clipboard(&pb, &latest, &mut last, |_| panic!("text normalized"));
+        poll_clipboard(&pb, &latest, &mut last, false, |_| {
+            panic!("text normalized")
+        });
         assert!(latest.lock().unwrap().is_none());
     }
 
@@ -394,13 +443,13 @@ mod tests {
         let pb = image_board();
         let latest = Arc::new(Mutex::new(None));
         let mut last = -1;
-        poll_clipboard(&pb, &latest, &mut last, |_| {
+        poll_clipboard(&pb, &latest, &mut last, false, |_| {
             pb.clearContents();
             pb.setData_forType(Some(&NSData::with_bytes(b"second image")), &png_type());
             Some("/tmp/first.png".into())
         });
         assert_ne!(last, pb.changeCount());
-        poll_clipboard(&pb, &latest, &mut last, |bytes| {
+        poll_clipboard(&pb, &latest, &mut last, false, |bytes| {
             assert_eq!(bytes, b"second image");
             Some("/tmp/second.png".into())
         });
@@ -453,12 +502,14 @@ mod tests {
         pb.clearContents();
         let latest = Arc::new(Mutex::new(Some("/tmp/old.png".into())));
         let mut last = -1;
-        poll_clipboard(&pb, &latest, &mut last, |_| panic!("empty clipboard"));
+        poll_clipboard(&pb, &latest, &mut last, false, |_| {
+            panic!("empty clipboard")
+        });
         assert!(latest.lock().unwrap().is_none());
         let count = pb.changeCount();
         pb.setData_forType(Some(&NSData::with_bytes(b"late PNG")), &png_type());
         assert_eq!(pb.changeCount(), count);
-        poll_clipboard(&pb, &latest, &mut last, |bytes| {
+        poll_clipboard(&pb, &latest, &mut last, false, |bytes| {
             assert_eq!(bytes, b"late PNG");
             Some("/tmp/late.png".into())
         });
@@ -471,11 +522,13 @@ mod tests {
         unsafe { pb.declareTypes_owner(&NSArray::from_retained_slice(&[png_type()]), None) };
         let latest = Arc::new(Mutex::new(None));
         let mut last = -1;
-        poll_clipboard(&pb, &latest, &mut last, |_| panic!("no data yet"));
+        poll_clipboard(&pb, &latest, &mut last, false, |_| panic!("no data yet"));
         let count = pb.changeCount();
         pb.setData_forType(Some(&NSData::with_bytes(b"late PNG")), &png_type());
         assert_eq!(pb.changeCount(), count);
-        poll_clipboard(&pb, &latest, &mut last, |_| Some("/tmp/late.png".into()));
+        poll_clipboard(&pb, &latest, &mut last, false, |_| {
+            Some("/tmp/late.png".into())
+        });
         assert_eq!(*latest.lock().unwrap(), Some("/tmp/late.png".into()));
     }
 
@@ -499,7 +552,9 @@ mod tests {
         assert!(is_image_only_clipboard(&pb));
         let latest = Arc::new(Mutex::new(None));
         let mut last = -1;
-        poll_clipboard(&pb, &latest, &mut last, |_| Some("/tmp/browser.png".into()));
+        poll_clipboard(&pb, &latest, &mut last, false, |_| {
+            Some("/tmp/browser.png".into())
+        });
         assert_eq!(*latest.lock().unwrap(), Some("/tmp/browser.png".into()));
         assert_eq!(
             pb.dataForType(&pasteboard_type("public.html"))
@@ -508,6 +563,58 @@ mod tests {
             b"metadata"
         );
     }
+
+    fn board_types(pb: &NSPasteboard) -> Vec<String> {
+        let types = pb.types().unwrap();
+        (0..types.count())
+            .map(|i| types.objectAtIndex(i).to_string())
+            .collect()
+    }
+
+    /// Issue #13: GUI apps must keep pasting exactly what the screenshot tool
+    /// copied, while remote consumers still receive the image over HTTP.
+    #[test]
+    fn server_only_serves_the_image_without_rewriting_the_clipboard() {
+        let pb = image_board();
+        let count = pb.changeCount();
+        let before = board_types(&pb);
+        let latest = Arc::new(Mutex::new(None));
+        let mut last = -1;
+        poll_clipboard(&pb, &latest, &mut last, true, |bytes| {
+            assert_eq!(bytes, b"png fixture");
+            Some("/tmp/server-only.png".into())
+        });
+        assert_eq!(*latest.lock().unwrap(), Some("/tmp/server-only.png".into()));
+        assert_eq!(pb.changeCount(), count);
+        assert_eq!(board_types(&pb), before);
+        poll_clipboard(&pb, &latest, &mut last, true, |_| {
+            panic!("same copy restaged")
+        });
+
+        pb.clearContents();
+        pb.setString_forType(&NSString::from_str("text"), &string_type());
+        poll_clipboard(&pb, &latest, &mut last, true, |_| panic!("text staged"));
+        assert!(latest.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn server_only_does_not_serve_an_image_replaced_during_save() {
+        let pb = image_board();
+        let latest = Arc::new(Mutex::new(None));
+        let mut last = -1;
+        poll_clipboard(&pb, &latest, &mut last, true, |_| {
+            pb.clearContents();
+            pb.setData_forType(Some(&NSData::with_bytes(b"second image")), &png_type());
+            Some("/tmp/first.png".into())
+        });
+        assert!(latest.lock().unwrap().is_none());
+        poll_clipboard(&pb, &latest, &mut last, true, |bytes| {
+            assert_eq!(bytes, b"second image");
+            Some("/tmp/second.png".into())
+        });
+        assert_eq!(*latest.lock().unwrap(), Some("/tmp/second.png".into()));
+    }
+
     fn types(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
     }

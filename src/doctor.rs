@@ -202,6 +202,13 @@ fn health_version(body: &str) -> Option<String> {
     }
 }
 
+/// Server-only mode is set in the daemon's environment, which `doctor` cannot
+/// see, and it deliberately disables local path paste. Without surfacing it, a
+/// healthy report would leave "Cmd+V pastes no path" unexplained.
+fn health_server_only(body: &str) -> bool {
+    body.replace(' ', "").contains("\"mode\":\"server-only\"")
+}
+
 fn is_executable(p: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -344,12 +351,17 @@ fn clipboard_host_checks() -> Vec<Check> {
     match common::http_get(&format!("{base}/health")) {
         Some(body) if is_clipaste_health(&body) => {
             let running = health_version(&body).unwrap_or_else(|| "unknown".into());
-            let mut detail = format!("daemon responding on 127.0.0.1:{}", common::DEFAULT_PORT);
+            let mode = if health_server_only(&body) {
+                " (server-only: the local clipboard is left unmodified, so local terminals get no file path)"
+            } else {
+                ""
+            };
+            let mut detail = format!("daemon responding on 127.0.0.1:{}{mode}", common::DEFAULT_PORT);
             if running != common::VERSION {
                 // A stale daemon is the classic "I upgraded but nothing changed"
                 // trap: the new binary is on disk, the old one still owns the port.
                 detail = format!(
-                    "daemon on port {} reports v{running}, but this binary is v{} — the running daemon is stale",
+                    "daemon on port {} reports v{running}, but this binary is v{} — the running daemon is stale{mode}",
                     common::DEFAULT_PORT,
                     common::VERSION
                 );
@@ -642,6 +654,19 @@ mod tests {
         assert_eq!(health_version(body).as_deref(), Some("2.4.1"));
         assert!(!is_clipaste_health("<html>nginx</html>"));
         assert_eq!(health_version("{\"status\":\"ok\"}"), None);
+        assert!(!health_server_only(body));
+    }
+
+    /// Both ends of the /health contract: the mode field must not stop any
+    /// reader from recognising clipaste or its version, and must be detected.
+    #[test]
+    fn health_body_reports_server_only_without_breaking_readers() {
+        for server_only in [false, true] {
+            let body = crate::server::health_body(server_only);
+            assert!(is_clipaste_health(&body), "{body}");
+            assert_eq!(health_version(&body).as_deref(), Some(common::VERSION));
+            assert_eq!(health_server_only(&body), server_only, "{body}");
+        }
     }
 
     #[test]
