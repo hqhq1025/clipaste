@@ -70,6 +70,12 @@ fn main() {
     // Reject unsupported hosts before starting a listener or touching the cache.
     require_clipboard_host();
 
+    let server_only = parse_server_only(std::env::var_os("CLIPASTE_SERVER_ONLY").as_deref())
+        .unwrap_or_else(|e| {
+            eprintln!("clipaste: {e}");
+            std::process::exit(1);
+        });
+
     #[cfg(target_os = "linux")]
     let backend = linux::detect().unwrap_or_else(|e| {
         eprintln!("clipaste: {e}");
@@ -78,17 +84,17 @@ fn main() {
 
     // Start HTTP server for remote access
     let latest = common::LatestImage::default();
-    if let Err(e) = server::start(latest.clone()) {
+    if let Err(e) = server::start(latest.clone(), server_only) {
         eprintln!("clipaste: cannot start HTTP server: {e}");
         std::process::exit(1);
     }
 
     // Start clipboard watcher (platform-specific)
     #[cfg(target_os = "macos")]
-    macos::run(latest);
+    macos::run(latest, server_only);
 
     #[cfg(target_os = "windows")]
-    windows::run(latest);
+    windows::run(latest, server_only);
 
     #[cfg(target_os = "linux")]
     if let Err(e) = linux::run(backend, latest) {
@@ -110,6 +116,25 @@ fn require_clipboard_host() {
             and clipaste wsl-setup inside WSL2."
         );
         std::process::exit(1);
+    }
+}
+
+/// Parse `CLIPASTE_SERVER_ONLY`, which keeps the macOS/Windows clipboard
+/// untouched while images are still served over HTTP (issue #13).
+///
+/// Only `1` enables it; unset, empty, and `0` leave the default. Anything else
+/// is rejected: a daemon that silently kept rewriting the clipboard after a
+/// typo such as `=true` would break GUI image paste with no visible cause.
+fn parse_server_only(value: Option<&std::ffi::OsStr>) -> Result<bool, String> {
+    let Some(value) = value else {
+        return Ok(false);
+    };
+    match value.to_str() {
+        Some("" | "0") => Ok(false),
+        Some("1") => Ok(true),
+        _ => Err(format!(
+            "CLIPASTE_SERVER_ONLY must be 1 or 0, not {value:?}"
+        )),
     }
 }
 
@@ -212,10 +237,27 @@ fn parse_wsl_setup_args(args: &[String]) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ssh_setup_args, parse_wsl_setup_args};
+    use super::{parse_server_only, parse_ssh_setup_args, parse_wsl_setup_args};
+    use std::ffi::OsStr;
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn server_only_is_opt_in_with_one() {
+        assert_eq!(parse_server_only(None), Ok(false));
+        assert_eq!(parse_server_only(Some(OsStr::new(""))), Ok(false));
+        assert_eq!(parse_server_only(Some(OsStr::new("0"))), Ok(false));
+        assert_eq!(parse_server_only(Some(OsStr::new("1"))), Ok(true));
+    }
+
+    #[test]
+    fn server_only_rejects_values_it_would_otherwise_ignore() {
+        for value in ["true", "yes", "on", " 1", "2"] {
+            let err = parse_server_only(Some(OsStr::new(value))).unwrap_err();
+            assert!(err.contains("CLIPASTE_SERVER_ONLY must be 1 or 0"), "{err}");
+        }
     }
 
     #[test]

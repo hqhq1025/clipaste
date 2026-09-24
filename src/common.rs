@@ -448,7 +448,10 @@ FOR CODING AGENTS
 
 WHAT IT DOES
   Local:  Watches the clipboard. When a screenshot is detected, saves it as
-          a cached PNG. macOS/Windows also register the file path for pasting.
+          a cached PNG. macOS/Windows also register the file path for pasting,
+          unless CLIPASTE_SERVER_ONLY=1 is set: then the clipboard stays as
+          copied (GUI apps paste the image) and the PNG is only served over
+          HTTP to SSH/WSL2 consumers.
           Linux reads image/png without modifying the clipboard.
 
   SSH:    Runs an HTTP server on port {DEFAULT_PORT}. Use 'ssh-setup' to
