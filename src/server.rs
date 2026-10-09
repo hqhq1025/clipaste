@@ -1,4 +1,4 @@
-use crate::common::{self, LatestImage};
+use crate::common::{self, LatestImage, StagedImage};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -55,12 +55,13 @@ fn handle_request(mut stream: std::net::TcpStream, latest: LatestImage, server_o
         };
         respond(&mut stream, 200, "application/json", body.as_bytes());
     } else if first_line.starts_with("GET /clipboard/image") {
-        let path = latest.lock().ok().and_then(|g| g.clone());
-        match path {
-            Some(p) => match std::fs::read(&p) {
+        let staged = latest.lock().ok().and_then(|g| g.clone());
+        match staged {
+            Some(StagedImage::File(p)) => match std::fs::read(&p) {
                 Ok(data) => respond(&mut stream, 200, "image/png", &data),
                 Err(_) => respond(&mut stream, 404, "text/plain", b"file not found"),
             },
+            Some(StagedImage::Memory(data)) => respond(&mut stream, 200, "image/png", &data),
             None => respond(&mut stream, 204, "text/plain", b""),
         }
     } else {
@@ -81,4 +82,55 @@ fn respond(stream: &mut std::net::TcpStream, status: u16, content_type: &str, bo
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex};
+
+    fn get(latest: &LatestImage, path: &str) -> Vec<u8> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        client
+            .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost:18340\r\n\r\n").as_bytes())
+            .unwrap();
+        handle_request(server, latest.clone(), false);
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).unwrap();
+        response
+    }
+
+    fn body(response: &[u8]) -> &[u8] {
+        let end = response.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        &response[end + 4..]
+    }
+
+    #[test]
+    fn serves_an_image_staged_in_memory() {
+        let latest = Arc::new(Mutex::new(common::stage_in_memory(b"png bytes")));
+        let response = get(&latest, "/clipboard/image");
+        assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert_eq!(body(&response), b"png bytes");
+        assert!(String::from_utf8_lossy(&get(&latest, "/clipboard/type")).contains("\"image\""));
+    }
+
+    #[test]
+    fn serves_a_cached_file_and_reports_a_deleted_one() {
+        let path =
+            std::env::temp_dir().join(format!("clipaste-server-test-{}.png", std::process::id()));
+        std::fs::write(&path, b"cached bytes").unwrap();
+        let latest = Arc::new(Mutex::new(Some(StagedImage::File(path.clone()))));
+        assert_eq!(body(&get(&latest, "/clipboard/image")), b"cached bytes");
+        std::fs::remove_file(&path).unwrap();
+        assert!(get(&latest, "/clipboard/image").starts_with(b"HTTP/1.1 404 "));
+    }
+
+    #[test]
+    fn reports_no_content_when_nothing_is_staged() {
+        let latest = LatestImage::default();
+        assert!(get(&latest, "/clipboard/image").starts_with(b"HTTP/1.1 204 "));
+    }
 }

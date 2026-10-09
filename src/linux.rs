@@ -1,7 +1,7 @@
 //! Read the desktop clipboard without taking ownership or modifying its formats.
 //! The system tools implement the selection protocols, including X11 INCR.
 
-use crate::common::{self, LatestImage};
+use crate::common::{self, LatestImage, StagedImage};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read};
@@ -280,7 +280,7 @@ fn stage(
 ) -> Result<(), String> {
     let published = latest.lock().unwrap().clone();
     if png == previous.as_deref()
-        && (png.is_none() || published.as_ref().is_some_and(|p| p.is_file()))
+        && (png.is_none() || published.as_ref().is_some_and(StagedImage::is_available))
     {
         return Ok(());
     }
@@ -288,7 +288,7 @@ fn stage(
     *previous = None;
     if let Some(bytes) = png {
         let path = save(bytes).ok_or("Cannot publish the clipboard PNG cache")?;
-        *latest.lock().unwrap() = Some(path);
+        *latest.lock().unwrap() = Some(StagedImage::File(path));
         *previous = Some(bytes.to_vec());
     }
     Ok(())
@@ -486,7 +486,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             *latest.lock().unwrap(),
-            Some(std::env::current_exe().unwrap())
+            Some(StagedImage::File(std::env::current_exe().unwrap()))
         );
         stage(&latest, None, &mut previous, |_| panic!("non-image write")).unwrap();
         assert!(latest.lock().unwrap().is_none());
@@ -496,7 +496,10 @@ mod tests {
             Some(PathBuf::from("b"))
         })
         .unwrap();
-        assert_eq!(*latest.lock().unwrap(), Some(PathBuf::from("b")));
+        assert_eq!(
+            *latest.lock().unwrap(),
+            Some(StagedImage::File(PathBuf::from("b")))
+        );
     }
 
     #[test]

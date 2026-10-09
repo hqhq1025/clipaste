@@ -39,7 +39,7 @@ access. Linux hosting reads `image/png` only; it does not add local text-path pa
 - Server-only mode: set `CLIPASTE_SERVER_ONLY=1` in the macOS/Windows daemon's
   environment when the user only pastes remotely or GUI apps paste a path instead
   of the image. The clipboard is left as copied, images are still served over
-  HTTP, and local terminals get no path. `doctor` reports `server-only` in its
+  HTTP from memory (nothing is written to the cache), and local terminals get no path. `doctor` reports `server-only` in its
   `daemon` check; `brew services` cannot set the variable, so macOS needs a user
   LaunchAgent (see the README)
 

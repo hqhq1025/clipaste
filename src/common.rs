@@ -31,8 +31,45 @@ pub fn unsupported_host_message(os: &str) -> String {
     )
 }
 
-/// Shared state: path to the most recently saved screenshot PNG
-pub type LatestImage = Arc<Mutex<Option<PathBuf>>>;
+/// The most recent clipboard image, as the HTTP server will serve it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StagedImage {
+    /// A PNG in the cache directory. Default mode puts this path on the local
+    /// clipboard, and clipboard histories may keep referencing it.
+    File(PathBuf),
+    /// Server-only mode: no clipboard references the image by path, so writing
+    /// the user's screen contents to disk would only leave copies behind.
+    /// Linux hosts never rewrite the clipboard and keep the documented cache.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    Memory(Arc<Vec<u8>>),
+}
+
+impl StagedImage {
+    /// Whether the server can still deliver this image; a cached file may have
+    /// been deleted by the user since it was staged.
+    #[cfg(target_os = "linux")]
+    pub fn is_available(&self) -> bool {
+        match self {
+            StagedImage::File(path) => path.is_file(),
+            StagedImage::Memory(_) => true,
+        }
+    }
+}
+
+/// Shared state: the most recently staged clipboard image
+pub type LatestImage = Arc<Mutex<Option<StagedImage>>>;
+
+/// Stage an image for HTTP consumers in the persistent PNG cache.
+#[cfg(target_os = "macos")]
+pub fn stage_in_cache(png_data: &[u8]) -> Option<StagedImage> {
+    save_png_to_temp(png_data).map(StagedImage::File)
+}
+
+/// Stage an image for HTTP consumers without touching the disk.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn stage_in_memory(png_data: &[u8]) -> Option<StagedImage> {
+    Some(StagedImage::Memory(Arc::new(png_data.to_vec())))
+}
 
 pub fn temp_dir() -> PathBuf {
     cache_root().join("clipaste")

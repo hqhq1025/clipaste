@@ -126,6 +126,20 @@ fn normalize(latest: &common::LatestImage, server_only: bool) {
         }
     };
 
+    if server_only {
+        // Rewriting empties the clipboard, dropping the CF_DIB that GUI apps
+        // paste as an image (issue #13). Nothing references the image by path,
+        // so remote consumers get it from memory and no copy reaches the disk.
+        let len = png_data.len();
+        if let Ok(mut guard) = latest.lock() {
+            *guard = common::stage_in_memory(&png_data);
+        }
+        common::log(&format!(
+            "staged clipboard image ({len} bytes) for remote paste"
+        ));
+        return;
+    }
+
     let file_path = match common::save_png_to_temp(&png_data) {
         Some(p) => p,
         None => return,
@@ -133,24 +147,15 @@ fn normalize(latest: &common::LatestImage, server_only: bool) {
 
     // Update shared state for HTTP server
     if let Ok(mut guard) = latest.lock() {
-        *guard = Some(file_path.clone());
+        *guard = Some(common::StagedImage::File(file_path.clone()));
     }
 
     let filename = file_path
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
-    if server_only {
-        // Rewriting empties the clipboard, dropping the CF_DIB that GUI apps
-        // paste as an image (issue #13); remote consumers only need the file.
-        common::log(&format!(
-            "staged {filename} ({} bytes) for remote paste",
-            png_data.len()
-        ));
-    } else {
-        write_path_to_clipboard(&file_path.to_string_lossy(), &png_data);
-        common::log(&format!("normalized {filename} ({} bytes)", png_data.len()));
-    }
+    write_path_to_clipboard(&file_path.to_string_lossy(), &png_data);
+    common::log(&format!("normalized {filename} ({} bytes)", png_data.len()));
 
     common::clean_old_temp_files();
 }
@@ -183,7 +188,9 @@ unsafe extern "system" fn wnd_proc(
 pub fn run(latest: common::LatestImage, server_only: bool) {
     LATEST.set(latest).expect("LATEST already initialized");
     SERVER_ONLY.store(server_only, Ordering::Relaxed);
-    common::ensure_temp_dir();
+    if !server_only {
+        common::ensure_temp_dir();
+    }
     common::log(&format!(
         "v{} started (pid {})",
         common::VERSION,
@@ -191,7 +198,7 @@ pub fn run(latest: common::LatestImage, server_only: bool) {
     ));
     if server_only {
         common::log(
-            "server-only mode: images are served over HTTP; the clipboard is never rewritten",
+            "server-only mode: images are served over HTTP from memory; the clipboard is never rewritten",
         );
     }
 

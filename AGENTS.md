@@ -262,8 +262,9 @@ The macOS/Windows daemon adds a file path to the local clipboard after each
 screenshot. Offer `CLIPASTE_SERVER_ONLY=1` when the user only pastes into
 agents over SSH or WSL2, or reports that GUI apps paste a path instead of the
 image (on Windows the rewrite drops the bitmap). The daemon then leaves the
-clipboard as copied and still serves images to remote consumers. Do not enable
-it for a user who pastes screenshots into local terminals: those rely on the path.
+clipboard as copied and still serves images to remote consumers, keeping only
+the latest image in memory instead of the PNG cache. Do not enable it for a user
+who pastes screenshots into local terminals: those rely on the path.
 
 - Windows: `setx CLIPASTE_SERVER_ONLY 1`, set `$env:CLIPASTE_SERVER_ONLY = "1"`
   in the same PowerShell, then stop and restart `clipaste.exe` from it. The Run
@@ -271,7 +272,8 @@ it for a user who pastes screenshots into local terminals: those rely on the pat
 - macOS: `brew services` cannot pass environment variables. Replace it with a
   LaunchAgent that sets `EnvironmentVariables`, following the README recipe, and
   restart that agent with `launchctl kickstart -k`, not `brew services restart`.
-- Linux never modifies the clipboard; the variable changes nothing there.
+- Linux never modifies the clipboard; the variable changes nothing there, and
+  Linux keeps its documented cache.
 
 Verify with `clipaste doctor --json`: the `daemon` check detail contains
 `server-only`. If it does not, the running daemon did not receive the variable

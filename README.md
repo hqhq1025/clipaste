@@ -44,7 +44,8 @@ modified copies so compatible history managers, including Maccy 2.6.1, can
 replace the original entry. Identical PNG bytes reuse a stable cache path.
 Cached images no longer expire automatically after one hour, so saved history
 paths remain usable. Storage grows with unique images; deleting cached files
-invalidates history entries that reference those paths.
+invalidates history entries that reference those paths. A macOS/Windows daemon in
+[server-only mode](#server-only-mode) does not use the cache.
 See [clipboard history compatibility](docs/clipboard-history.md) for details.
 
 Linux also uses the private stable PNG cache (`~/.cache/clipaste`, directory
@@ -276,9 +277,11 @@ screenshot so that local terminals can paste it. If your agents only run over
 SSH or in WSL2, that path has no local use. On Windows the rewrite also removes
 the bitmap, so Slack, Word, or Paint paste the path instead of the image.
 Set `CLIPASTE_SERVER_ONLY=1` in the daemon's environment to leave the clipboard
-exactly as the screenshot tool wrote it. The daemon still caches each image and
-serves it on `127.0.0.1:18340`, so SSH and WSL2 consumers keep working, but local
-terminals no longer receive a path. Linux hosts always work this way.
+exactly as the screenshot tool wrote it. The daemon keeps only the latest image
+in memory and serves it on `127.0.0.1:18340`, so SSH and WSL2 consumers keep
+working, but local terminals no longer receive a path. Nothing is written to the
+PNG cache in this mode; files cached earlier stay until you delete them. Linux
+hosts never rewrite the clipboard either, but they always use the cache.
 
 Windows (PowerShell):
 

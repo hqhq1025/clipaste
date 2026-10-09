@@ -348,10 +348,15 @@ fn clipboard_host_checks() -> Vec<Check> {
         Err(e) => return vec![Check::fail("backend", e)],
     }
 
+    let mut server_only = false;
     match common::http_get(&format!("{base}/health")) {
         Some(body) if is_clipaste_health(&body) => {
+            // Linux always keeps its documented cache, even in this mode.
+            server_only = health_server_only(&body) && !cfg!(target_os = "linux");
             let running = health_version(&body).unwrap_or_else(|| "unknown".into());
-            let mode = if health_server_only(&body) {
+            let mode = if server_only {
+                " (server-only: the local clipboard is left unmodified, so local terminals get no file path; images stay in memory)"
+            } else if health_server_only(&body) {
                 " (server-only: the local clipboard is left unmodified, so local terminals get no file path)"
             } else {
                 ""
@@ -404,6 +409,14 @@ fn clipboard_host_checks() -> Vec<Check> {
     }
 
     let cache = common::temp_dir();
+    if server_only {
+        // Creating the directory here would leave behind exactly what the mode avoids.
+        checks.push(Check::ok(
+            "cache-dir",
+            "not used: the server-only daemon keeps images in memory",
+        ));
+        return checks;
+    }
     common::ensure_temp_dir();
     if cache.is_dir() {
         checks.push(Check::ok("cache-dir", cache.display().to_string()));

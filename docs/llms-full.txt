@@ -64,8 +64,9 @@ never leaves loopback except through the user's own SSH connection.
 wsl-setup` installs the same shims inside the distro, pointed at clipaste.exe on Windows.
 
 **Server-only mode.** With `CLIPASTE_SERVER_ONLY=1` in the daemon's environment,
-macOS and Windows stage and serve images exactly as above but never rewrite the
-local clipboard, so GUI apps keep pasting the original image. On Windows the
+macOS and Windows serve images exactly as above but never rewrite the local
+clipboard, so GUI apps keep pasting the original image. The latest image is held
+in memory only; nothing is written to the PNG cache. On Windows the
 default rewrite removes `CF_DIB`, which is why apps such as Slack or Word paste a
 path there. Local terminals get no path in this mode. `brew services` cannot pass
 the variable, so macOS needs a user LaunchAgent with `EnvironmentVariables`; on
@@ -411,12 +412,13 @@ Linux verification is not a substitute for macOS/Windows regression checks.
   When the clipboard instead holds a *file URL* pointing at an image (a screenshot saved
   to disk and then copied in Finder), the file is captured for remote serving without
   touching the local clipboard. In server-only mode, image data is captured the same
-  way: the pasteboard is never rewritten, and a capture is discarded if the change
-  count moved during conversion.
+  way into memory: the pasteboard is never rewritten, and a capture is discarded if
+  the change count moved during conversion.
 - **Windows**: fully event-driven. A hidden `HWND_MESSAGE` window registers via
   `AddClipboardFormatListener` and handles `WM_CLIPBOARDUPDATE`, de-duplicated with
   `GetClipboardSequenceNumber`. `CF_DIB` is converted to PNG and the path written back as
-  `CF_UNICODETEXT`. Server-only mode skips that write, leaving `CF_DIB` in place.
+  `CF_UNICODETEXT`. Server-only mode skips that write, leaving `CF_DIB` in place,
+  and keeps the PNG in memory instead of the cache.
   There is no polling loop.
 - Linux: polls every 300 ms using bounded one-shot `wl-paste --watch` calls
   for Wayland data-control, or system `xclip` for X11/XWayland. Reads `image/png`
